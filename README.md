@@ -43,16 +43,20 @@ The system includes manual keyboard control for the robot arm, as well as real-t
 ## Running the Application
 
 ### Terminal 1: Start the Robot Arm
-bashcd /home/roboarm/interbotix_ws/src/px150_game
+```
+cd /home/roboarm/interbotix_ws/src/px150_game
 source /opt/ros/humble/setup.bash
 source ~/interbotix_ws/install/setup.bash
 ./run_arm.sh
+```
 
 ### Terminal 2: Launch the Game Interface
-bashcd /home/roboarm/interbotix_ws/src/px150_game
+```
+cd /home/roboarm/interbotix_ws/src/px150_game
 source /opt/ros/humble/setup.bash
 source ~/interbotix_ws/install/setup.bash
 ./run_game_pygame.sh
+```
 After launch, the following will appear in a single Pygame window:
 
 Live RGB stream from RealSense
