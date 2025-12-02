@@ -2,18 +2,20 @@
 
 **CS468 Project**
 
-This project implements an interactive color block picking game using the Interbotix PX150 robotic arm, an Intel RealSense depth camera, and a custom Pygame interface. The system performs real-time color detection using OpenCV, displays live camera output through Pygame, and controls the robotic arm based on user key takes.
+This project implements an interactive object-picking game using the Interbotix PX150 robotic arm, an Intel RealSense depth camera, and a custom Pygame interface. The system performs real-time object detection using YOLOv8 nano (AI-driven), displays live camera output through Pygame, and controls the robotic arm based on user keyboard inputs.
 
 ---
 
 ## Project Description
 
-The user places colored objects (blocks in this case) within the camera's field of view. The game selects a random target color. The user should the use the arm to move the color into the detection region.When the correct color appears inside the Region of Interest (ROI), the application:
+The user places colored objects within the camera's field of view. The game selects a random target color. The user uses the arm to move the target object into the detection region. When the correct object appears inside the Region of Interest (ROI), the application:
 
-- Confirms the color using HSV segmentation and depth validation
+- Detects the object using YOLOv8 nano object detection model (AI-driven)
+- Classifies the color using YOLOv8 nano classification model (with HSV fallback for display)
+- Validates depth and object type
 - Triggers an animation in the Pygame interface
 - Commands the PX150 robotic arm to home position
-- Increments the game score and assigns a new target color
+- Increments the game score and assigns a new target object
 
 The system includes manual keyboard control for the robot arm, as well as real-time calibration through tunable parameters.
 
@@ -30,13 +32,16 @@ The system includes manual keyboard control for the robot arm, as well as real-t
 
 ### Software
 
-- Ubuntu 20.04 or 22.04
+- Ubuntu 20.04 or 22.04 
 - Python 3.8+
 - RealSense SDK (librealsense2)
 - Interbotix SDK (XS series)
 - Pygame
 - OpenCV
 - NumPy
+- PyTorch (for YOLO models)
+- Ultralytics (YOLO library)
+- pyrealsense2
 
 ---
 
@@ -93,18 +98,18 @@ Status display (target color, score, instructions)
 
 ## Key Tunable Parameters
 
-Inside the script:
+In `ai_vision.py`:
 
 ```python
-JOINT_STEP = 0.12
-MOVING_TIME = 0.12
-ROI_PIXEL_MIN = 500
-DEPTH_THRESHOLD_M = 0.7
-SAMPLES_FOR_CONFIRM = 5
-SAMPLES_MAJORITY = 3
+DEPTH_THRESHOLD_M = 0.7        # Only detect objects within this depth (meters)
+MIN_CONFIDENCE = 0.2            # Minimum confidence for object detection
+YOLO_CONF_THRESHOLD = 0.1       # YOLO confidence threshold (very low for all objects)
+YOLO_IMAGE_SIZE = 640          # YOLO input image size (optimized for speed)
+YOLO_IOU_THRESHOLD = 0.5       # IoU threshold for non-maximum suppression
+YOLO_MAX_DETECTIONS = 500      # Maximum detections per image
 ```
 
-These values govern robot responsiveness, detection stability, and game pacing.
+These values govern AI detection sensitivity, depth filtering, and performance.
 
 ---
 
@@ -112,11 +117,17 @@ These values govern robot responsiveness, detection stability, and game pacing.
 
 ```
 project/
-│
-├── color_game.py        # Main Pygame + RealSense + PX150 control script
-├── requirements.txt     
-├── README.md            # Project documentation
-This section needs to be updated
+├── ai_vision.py                    # AI Vision System (YOLOv8 nano object/color detection)
+├── ai_game_state.py               # Game state management and AI integration
+├── color_picking_game_pygame.py   # Main Pygame + RealSense + PX150 control script
+├── test_ai_system.py              # AI system testing
+├── test_dependencies.py           # Dependency verification
+├── yolov8n.pt                     # YOLOv8 nano object detection model
+├── yolov8n-cls.pt                 # YOLOv8 nano color classification model
+├── yolo_colors.pt                 # Fine-tuned YOLOv8 color classifier (optional)
+├── requirements.txt               # Python dependencies
+├── README.md                      # Project documentation
+└── run_game_pygame.sh            # Launch script
 ```
 
 ## Acknowledgments

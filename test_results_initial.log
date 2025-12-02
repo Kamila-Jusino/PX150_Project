@@ -1,0 +1,109 @@
+Traceback (most recent call last):
+  File "/home/roboarm/interbotix_ws/src/px150_game/test_ai_system.py", line 131, in test_color_classification_hsv
+    result = vision._classify_color_hsv(test_img)
+AttributeError: 'AIVisionSystem' object has no attribute '_classify_color_hsv'
+Traceback (most recent call last):
+  File "/home/roboarm/interbotix_ws/src/px150_game/test_ai_system.py", line 144, in test_color_classification_ai
+    vision = AIVisionSystem(model_type='yolo')
+  File "/home/roboarm/interbotix_ws/src/px150_game/ai_vision.py", line 129, in __init__
+    self.profile = self.pipeline.start(cfg)
+RuntimeError: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+Traceback (most recent call last):
+  File "/home/roboarm/interbotix_ws/src/px150_game/test_ai_system.py", line 167, in test_verify_gripper_object
+    vision = AIVisionSystem(model_type='yolo')
+  File "/home/roboarm/interbotix_ws/src/px150_game/ai_vision.py", line 129, in __init__
+    self.profile = self.pipeline.start(cfg)
+RuntimeError: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+Traceback (most recent call last):
+  File "/home/roboarm/interbotix_ws/src/px150_game/test_ai_system.py", line 378, in test_invalid_color_classification
+    vision = AIVisionSystem(model_type='yolo')
+  File "/home/roboarm/interbotix_ws/src/px150_game/ai_vision.py", line 129, in __init__
+    self.profile = self.pipeline.start(cfg)
+RuntimeError: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+Traceback (most recent call last):
+  File "/home/roboarm/interbotix_ws/src/px150_game/test_ai_system.py", line 393, in test_small_roi_classification
+    vision = AIVisionSystem(model_type='yolo')
+  File "/home/roboarm/interbotix_ws/src/px150_game/ai_vision.py", line 129, in __init__
+    self.profile = self.pipeline.start(cfg)
+RuntimeError: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+Traceback (most recent call last):
+  File "/home/roboarm/interbotix_ws/src/px150_game/test_ai_system.py", line 408, in test_verify_gripper_invalid_input
+    vision = AIVisionSystem(model_type='yolo')
+  File "/home/roboarm/interbotix_ws/src/px150_game/ai_vision.py", line 129, in __init__
+    self.profile = self.pipeline.start(cfg)
+RuntimeError: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+======================================================================
+AI-ENHANCED COLOR PICKING GAME - COMPREHENSIVE TEST SUITE
+======================================================================
+Test Run Started: 2025-12-01 19:17:02
+
+
+--- Core Functionality Tests ---
+Loading YOLOv8 pretrained model (optimized for speed)...
+✓ YOLO model loaded successfully (yolov8n for fast detection)
+✓ Color classifier initialized (using YOLO features)
+✓ PASS: AI Vision System Initialization
+Loading YOLOv8 pretrained model (optimized for speed)...
+✓ YOLO model loaded successfully (yolov8n for fast detection)
+✓ Color classifier initialized (using YOLO features)
+✓ PASS: AI Vision System (No Pipeline)
+✓ PASS: AI Game State Initialization
+✓ PASS: Update Game State from AI Scan
+✓ PASS: AI Select Target (Normal)
+
+--- Color Classification Tests ---
+Loading YOLOv8 pretrained model (optimized for speed)...
+✓ YOLO model loaded successfully (yolov8n for fast detection)
+✓ Color classifier initialized (using YOLO features)
+✗ ERROR: HSV Color Classification - 'AIVisionSystem' object has no attribute '_classify_color_hsv'
+Loading YOLOv8 pretrained model (optimized for speed)...
+✓ YOLO model loaded successfully (yolov8n for fast detection)
+✓ Color classifier initialized (using YOLO features)
+✗ ERROR: AI Color Classification - xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+Loading YOLOv8 pretrained model (optimized for speed)...
+✓ YOLO model loaded successfully (yolov8n for fast detection)
+✓ Color classifier initialized (using YOLO features)
+✗ ERROR: Verify Gripper Object - xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+
+--- Game State Management Tests ---
+✓ PASS: Update Game State from Empty Scan
+✓ PASS: AI Select Target (Easy)
+✓ PASS: AI Select Target (Hard)
+✓ PASS: AI Select Target (Empty)
+✓ PASS: Remove Object by Color
+✓ PASS: Remove All Objects of a Color
+✓ PASS: Get Detection Summary
+✓ PASS: Get Object Count by Color
+✓ PASS: Has Color Available
+
+--- Edge Case Tests ---
+Loading YOLOv8 pretrained model (optimized for speed)...
+✓ YOLO model loaded successfully (yolov8n for fast detection)
+✓ Color classifier initialized (using YOLO features)
+✗ ERROR: Invalid Color Classification - xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+Loading YOLOv8 pretrained model (optimized for speed)...
+✓ YOLO model loaded successfully (yolov8n for fast detection)
+✓ Color classifier initialized (using YOLO features)
+✗ ERROR: Small ROI Classification - xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+Loading YOLOv8 pretrained model (optimized for speed)...
+✓ YOLO model loaded successfully (yolov8n for fast detection)
+✓ Color classifier initialized (using YOLO features)
+✗ ERROR: Verify Gripper Invalid Input - xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+
+======================================================================
+TEST SUMMARY
+======================================================================
+Total Tests: 20
+Passed: 14
+Failed: 0
+Errors: 6
+Time: 5.58s
+======================================================================
+
+ERRORS:
+  - HSV Color Classification: 'AIVisionSystem' object has no attribute '_classify_color_hsv'
+  - AI Color Classification: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+  - Verify Gripper Object: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+  - Invalid Color Classification: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+  - Small ROI Classification: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy
+  - Verify Gripper Invalid Input: xioctl(VIDIOC_S_FMT) failed, errno=16 Last Error: Device or resource busy

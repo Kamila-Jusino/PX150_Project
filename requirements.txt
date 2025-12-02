@@ -1,0 +1,20 @@
+# AI-Enhanced Color Picking Game Dependencies
+
+# Core AI/ML libraries
+ultralytics>=8.0.0  # YOLO model
+torch>=2.0.0  # PyTorch (CPU version, install CUDA version if GPU available)
+torchvision>=0.15.0  # For MobileNet fallback
+
+# Computer Vision
+opencv-python>=4.5.0
+numpy>=1.21.0
+
+# GUI
+pygame>=2.0.0
+
+# Camera
+pyrealsense2>=2.50.0
+
+# ROS/Interbotix (usually installed via ROS workspace)
+# interbotix_xs_modules - installed via ROS workspace
+
