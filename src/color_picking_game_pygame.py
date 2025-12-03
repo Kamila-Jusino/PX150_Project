@@ -10,13 +10,25 @@ import random
 import cv2
 import numpy as np
 import pygame
+import sys
+import logging
 from interbotix_xs_modules.xs_robot.arm import InterbotixManipulatorXS
 import pyrealsense2 as rs
-import sys
 
 # AI Integration imports
 from ai_vision import AIVisionSystem
 from ai_game_state import AIGameState
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('px150_game.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ----- TUNABLE PARAMETERS -----
 JOINT_STEP = 0.12 # radians per keypress
@@ -35,15 +47,19 @@ CAMERA_HEIGHT = 480
 class ColorPickingGame:
     def __init__(self):
         # --- Robot init ---
-        print("Initializing Interbotix PX150...")
-        self.robot = InterbotixManipulatorXS(
-            robot_model="px150",
-            group_name="arm",
-            gripper_name="gripper"
-        )
+        logger.info("Initializing Interbotix PX150...")
+        try:
+            self.robot = InterbotixManipulatorXS(
+                robot_model="px150",
+                group_name="arm",
+                gripper_name="gripper"
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize robot: {e}")
+            raise
 
         # --- Camera init ---
-        print("Initializing RealSense camera...")
+        logger.info("Initializing RealSense camera...")
         self.pipeline = rs.pipeline()
         cfg = rs.config()
         cfg.enable_stream(rs.stream.color, CAMERA_WIDTH, CAMERA_HEIGHT, rs.format.bgr8, 30)
@@ -57,9 +73,14 @@ class ColorPickingGame:
             self.pipeline.wait_for_frames()
 
         # --- AI Systems ---
-        print("Initializing AI Vision System...")
-        self.ai_vision = AIVisionSystem(self.pipeline, model_type='yolo')
-        print("Initializing AI Game State...")
+        logger.info("Initializing AI Vision System...")
+        try:
+            self.ai_vision = AIVisionSystem(self.pipeline, model_type='yolo')
+        except Exception as e:
+            logger.error(f"Failed to initialize AI Vision System: {e}")
+            raise
+        
+        logger.info("Initializing AI Game State...")
         self.ai_game_state = AIGameState()
 
         # Movement tuning
@@ -87,9 +108,6 @@ class ColorPickingGame:
         self.last_status_time = time.time()
         self.score = 0
         
-        # Difficulty setting (DISABLED)
-        # self.difficulty = 'normal'  # Options: 'easy', 'normal', 'hard'
-        
         # Visual effects
         self.flash_color = None  # For red/green screen flash
         self.flash_end_time = 0
@@ -116,8 +134,8 @@ class ColorPickingGame:
             self.robot.gripper.release()
             time.sleep(1.0)
         except Exception as e:
-            print(f"Warning: couldn't go home: {e}")
-        print("Game initialized! Pygame window should open.")
+            logger.warning(f"Couldn't go to home pose: {e}")
+        logger.info("Game initialized! Pygame window should open.")
 
     # ----------------- Camera & Vision -----------------
     def get_camera_frame(self):
@@ -195,7 +213,11 @@ class ColorPickingGame:
             if mean_depth_m > DEPTH_THRESHOLD_M:
                 return None
             return best_color
-        except Exception:
+        except (cv2.error, ValueError, AttributeError) as e:
+            logger.debug(f"Color detection error: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Unexpected error in color detection: {e}")
             return None
 
     # ----------------- Game logic -----------------
@@ -211,10 +233,12 @@ class ColorPickingGame:
         try:
             detections = self.ai_vision.scan_scene(num_samples=3)  # Optimized for speed
             num_objects = self.ai_game_state.update_from_ai_scan(detections)
+        except (RuntimeError, rs.error) as e:
+            logger.error(f"Camera error during YOLO scan: {e}")
+            num_objects = 0
+            detections = []
         except Exception as e:
-            print(f"Error during YOLO scan: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error during YOLO scan: {e}", exc_info=True)
             num_objects = 0
             detections = []
         
@@ -232,7 +256,7 @@ class ColorPickingGame:
         if num_objects > 0:
             # Target selection: randomly selects from detected object types
            
-            ai_target_object = self.ai_game_state.ai_select_target('normal')  # Parameter ignored, always random
+            ai_target_object = self.ai_game_state.ai_select_target()
             if ai_target_object:
                 self.current_target = ai_target_object  # PRIMARY: Object type (AI-driven)
                 self.start_time = time.time()
@@ -290,8 +314,10 @@ class ColorPickingGame:
                 detected_color = self.get_dominant_color_with_depth(roi, depth_frame, w, h)
                 if detected_color:
                     color_samples.append(detected_color)
-            except Exception:
-                pass
+            except (RuntimeError, rs.error) as e:
+                logger.debug(f"Frame capture error: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error in verification loop: {e}")
             time.sleep(0.1)
         
         # PRIMARY: Use AI verification (object type) if available
@@ -332,8 +358,10 @@ class ColorPickingGame:
                             detected_type = self.ai_vision.detect_object_type(roi)
                             if detected_type:
                                 detected_types.append(detected_type)
-                    except:
-                        pass
+                    except (RuntimeError, rs.error) as e:
+                        logger.debug(f"Frame capture error in wrong object detection: {e}")
+                    except Exception as e:
+                        logger.warning(f"Error detecting wrong object type: {e}")
                 
                 wrong_type = max(set(detected_types), key=detected_types.count) if detected_types else "unknown"
                 display_color = max(set(color_samples), key=color_samples.count) if color_samples else "unknown"
@@ -378,9 +406,13 @@ class ColorPickingGame:
     def _release_gripper(self):
         try:
             self.robot.gripper.release()
+            self.gripper_open = True
+        except (AttributeError, RuntimeError) as e:
+            logger.error(f"Gripper release error: {e}")
+            self.gripper_open = True  # Assume open on error
         except Exception as e:
-            print(f"Gripper release error: {e}")
-        self.gripper_open = True
+            logger.error(f"Unexpected gripper error: {e}")
+            self.gripper_open = True
         time.sleep(0.2)
 
     def set_status(self, message):
@@ -397,19 +429,33 @@ class ColorPickingGame:
             # Move to home
             self.robot.arm.go_to_home_pose(moving_time=2.0)
             self.set_status("Arm moved to home position.")
+        except (AttributeError, RuntimeError) as e:
+            logger.error(f"Error moving to home: {e}")
+            self.set_status(f"Error moving to home: {e}")
         except Exception as e:
+            logger.error(f"Unexpected error moving to home: {e}", exc_info=True)
             self.set_status(f"Error moving to home: {e}")
 
     # ----------------- Movement -----------------
     def move_joint_delta(self, joint_idx, delta):
+        """Move a joint by delta amount. Validates input before execution."""
+        if not isinstance(joint_idx, int) or not isinstance(delta, (int, float)):
+            self.set_status(f"Invalid input: joint_idx and delta must be numbers")
+            return
+        
         try:
             current_joints = list(self.robot.arm.get_joint_commands())
             if joint_idx < 0 or joint_idx >= len(current_joints):
+                self.set_status(f"Invalid joint index: {joint_idx} (valid range: 0-{len(current_joints)-1})")
                 return
             current_joints[joint_idx] += delta
             self.robot.arm.set_joint_positions(current_joints, moving_time=MOVING_TIME)
+        except (ValueError, IndexError, AttributeError) as e:
+            logger.error(f"Movement error: {e}")
+            self.set_status(f"Movement error: {e}")
         except Exception as e:
-            print(f"Movement error: {e}")
+            logger.error(f"Unexpected movement error: {e}", exc_info=True)
+            self.set_status(f"Movement error: {e}")
 
     # ----------------- Visual Effects -----------------
     def _start_confetti(self):
@@ -528,10 +574,6 @@ class ColorPickingGame:
         title = self.font_large.render("PX150 Color Picking Game", True, (255, 255, 255))
         self.screen.blit(title, (panel_x + 20, y_offset))
         y_offset += 60
-        # Difficulty display
-        difficulty_text = self.font_small.render(f"Difficulty: {self.difficulty.upper()}", True, (255, 200, 0))
-        self.screen.blit(difficulty_text, (panel_x + 20, y_offset))
-        y_offset += 30
         # Game status
         if self.current_target:
             target_text = f"Target: {self.current_target}"
@@ -572,7 +614,6 @@ class ColorPickingGame:
             "X: Release gripper manually",
             "H: Go to home (drops object)",
             "N: New round",
-            "1/2/3: Set difficulty (Easy/Normal/Hard)",
             "ESC: Quit"
         ]
         for control in controls:
@@ -620,7 +661,7 @@ class ColorPickingGame:
 
     # ----------------- Main loop -----------------
     def run(self):
-        print("Game running! Use the Pygame window for controls.")
+        logger.info("Game running! Use the Pygame window for controls.")
         
         while self.running:
             # Handle events
@@ -644,7 +685,11 @@ class ColorPickingGame:
                                 self.robot.gripper.grasp()
                                 self.gripper_open = False
                                 self.set_status("Gripper manually closed.")
+                            except (AttributeError, RuntimeError) as e:
+                                logger.error(f"Gripper error: {e}")
+                                self.set_status(f"Gripper error: {e}")
                             except Exception as e:
+                                logger.error(f"Unexpected gripper error: {e}")
                                 self.set_status(f"Gripper error: {e}")
                     elif event.key == pygame.K_x:
                         if not self.gripper_open:
@@ -658,27 +703,6 @@ class ColorPickingGame:
                         self.move_joint_delta(0, JOINT_STEP)
                     elif event.key == pygame.K_d:
                         self.move_joint_delta(0, -JOINT_STEP)
-                    elif event.key == pygame.K_1:
-                        # Set difficulty to easy (only before round starts)
-                        if self.current_target is None:
-                            self.difficulty = 'easy'
-                            self.set_status(f"Difficulty set to: EASY (most common object type)")
-                        else:
-                            self.set_status("Cannot change difficulty during a round. Finish current round first.")
-                    elif event.key == pygame.K_2:
-                        # Set difficulty to normal (only before round starts)
-                        if self.current_target is None:
-                            self.difficulty = 'normal'
-                            self.set_status(f"Difficulty set to: NORMAL (random object type)")
-                        else:
-                            self.set_status("Cannot change difficulty during a round. Finish current round first.")
-                    elif event.key == pygame.K_3:
-                        # Set difficulty to hard (only before round starts)
-                        if self.current_target is None:
-                            self.difficulty = 'hard'
-                            self.set_status(f"Difficulty set to: HARD (least common object type)")
-                        else:
-                            self.set_status("Cannot change difficulty during a round. Finish current round first.")
                     elif event.key == pygame.K_q:
                         self.move_joint_delta(2, -JOINT_STEP)
                     elif event.key == pygame.K_e:
@@ -706,7 +730,7 @@ class ColorPickingGame:
         self.cleanup()
 
     def cleanup(self):
-        print("\nShutting down: moving to safe pose & stopping camera.")
+        logger.info("Shutting down: moving to safe pose & stopping camera.")
         try:
             if not self.gripper_open:
                 self._release_gripper()
@@ -714,20 +738,24 @@ class ColorPickingGame:
             time.sleep(0.6)
             self.robot.arm.go_to_sleep_pose()
         except Exception as e:
-            print(f"Cleanup robot error: {e}")
+            logger.error(f"Cleanup robot error: {e}")
         try:
             self.ai_vision.cleanup()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Error cleaning up AI vision: {e}")
         try:
             self.pipeline.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Error stopping camera pipeline: {e}")
         pygame.quit()
         if self.round_times:
-            print(f"Rounds: {len(self.round_times)} | Best: {min(self.round_times):.2f}s | Avg: {sum(self.round_times)/len(self.round_times):.2f}s")
+            summary = f"Rounds: {len(self.round_times)} | Best: {min(self.round_times):.2f}s | Avg: {sum(self.round_times)/len(self.round_times):.2f}s"
+            logger.info(summary)
+            print(summary)
         else:
+            logger.info("No rounds completed.")
             print("No rounds completed.")
+        logger.info("Goodbye.")
         print("Goodbye.")
 
 if __name__ == "__main__":
@@ -735,10 +763,13 @@ if __name__ == "__main__":
         game = ColorPickingGame()
         game.run()
     except KeyboardInterrupt:
+        logger.info("Interrupted by user")
         print("\n\nInterrupted by user")
     except Exception as e:
+        logger.critical(f"Fatal error: {e}", exc_info=True)
         import traceback
         print(f"\nError: {e}")
         traceback.print_exc()
     finally:
+        logger.info("Exiting...")
         print("Exiting...")

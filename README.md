@@ -94,7 +94,6 @@ Status display (target color, score, instructions)
 | N | Start new round (AI scan) |
 | C | Check object in ROI (verification) |
 | H | Move robot to home position |
-| 1/2/3 | Set difficulty (Easy/Normal/Hard) - currently not used in selection |
 | Esc | Quit application |
 
 ---

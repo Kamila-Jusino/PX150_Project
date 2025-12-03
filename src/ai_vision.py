@@ -74,14 +74,17 @@ class AIVisionSystem:
         
         # Initialize AI model
         if model_type == 'yolo' and YOLO_AVAILABLE:
-            print("Loading YOLOv8 pretrained model (optimized for speed)...")
+            logger.info("Loading YOLOv8 pretrained model (optimized for speed)...")
             try:
                 # Use YOLOv8n (nano) for faster processing
                 self.model = YOLO(os.path.join(MODEL_DIR, 'yolov8n.pt'))  # Nano model for speed (object detection)
                 self.model_type = 'yolo'
-                print("✓ YOLO detection model loaded successfully (yolov8n for fast detection)")
+                logger.info("✓ YOLO detection model loaded successfully (yolov8n for fast detection)")
+            except (FileNotFoundError, OSError) as e:
+                logger.error(f"Failed to load YOLO model file: {e}")
+                self.model = None
             except Exception as e:
-                print(f"Failed to load YOLO: {e}")
+                logger.error(f"Unexpected error loading YOLO: {e}", exc_info=True)
                 self.model = None
             
             # Initialize color classification model (AI-driven color classification)
@@ -91,15 +94,18 @@ class AIVisionSystem:
                     try:
                         self.color_model = YOLO(os.path.join(MODEL_DIR, 'yolo_colors.pt'))
                         self.color_class_names = ['RED', 'GREEN', 'BLUE', 'YELLOW', 'ORANGE', 'PURPLE']
-                        print("✓ Fine-tuned YOLO color classifier loaded")
-                    except:
+                        logger.info("✓ Fine-tuned YOLO color classifier loaded")
+                    except (FileNotFoundError, OSError):
                         # Fallback to pretrained classification model
                         self.color_model = YOLO(os.path.join(MODEL_DIR, 'yolov8n-cls.pt'))
                         self.color_class_names = None  # Will use ImageNet classes (not ideal, but works)
-                        print("✓ Pretrained YOLO color classifier loaded (yolov8n-cls)")
-                        print("  Note: Consider fine-tuning for better color accuracy")
+                        logger.info("✓ Pretrained YOLO color classifier loaded (yolov8n-cls)")
+                        logger.info("  Note: Consider fine-tuning for better color accuracy")
+                except (FileNotFoundError, OSError) as e:
+                    logger.warning(f"Could not load color classifier: {e}")
+                    self.color_model = None
                 except Exception as e:
-                    print(f"Warning: Could not load color classifier: {e}")
+                    logger.error(f"Unexpected error loading color classifier: {e}", exc_info=True)
                     self.color_model = None
             else:
                 self.color_model = None
@@ -121,13 +127,16 @@ class AIVisionSystem:
                     transforms.Normalize(mean=[0.485, 0.456, 0.406], 
                                       std=[0.229, 0.224, 0.225])
                 ])
-                print("✓ MobileNet model loaded successfully")
+                logger.info("✓ MobileNet model loaded successfully")
+            except (ImportError, RuntimeError) as e:
+                logger.error(f"Failed to load MobileNet: {e}")
+                self.model = None
             except Exception as e:
-                print(f"Failed to load MobileNet: {e}")
+                logger.error(f"Unexpected error loading MobileNet: {e}", exc_info=True)
                 self.model = None
         
         if self.model is None:
-            print("WARNING: No AI model available. YOLO-only mode requires YOLO.")
+            logger.warning("WARNING: No AI model available. YOLO-only mode requires YOLO.")
             self.model_type = None
         
         # Note: Color classifier is now handled by YOLO classification model above
@@ -297,12 +306,6 @@ class AIVisionSystem:
             mean_rgb = color_stats[:3] * 255.0  # Denormalize to 0-255 range
             
             # VALIDATION: Check if color is too desaturated (too gray/neutral)
-            # Calculate saturation: how far from gray scale
-            max_channel = np.max(mean_rgb)
-            min_channel = np.min(mean_rgb)
-            saturation = (max_channel - min_channel) / (max_channel + 1e-6)  # Avoid division by zero
-            
-            # VALIDATION: Reject gray/neutral colors
             # Calculate saturation: how far from gray scale
             max_channel = np.max(mean_rgb)
             min_channel = np.min(mean_rgb)
@@ -483,8 +486,10 @@ class AIVisionSystem:
                         return 'block'
                     
                     return cls_name
+            except (RuntimeError, AttributeError) as e:
+                logger.error(f"Object type detection error: {e}")
             except Exception as e:
-                print(f"Object type detection error: {e}")
+                logger.error(f"Unexpected error in object type detection: {e}", exc_info=True)
         
         return None
     
@@ -549,8 +554,11 @@ class AIVisionSystem:
                         # Fall through to RGB fallback
                         pass
                         
+            except (RuntimeError, AttributeError) as e:
+                logger.warning(f"YOLO color classification error: {e}")
+                # Fall through to RGB fallback
             except Exception as e:
-                print(f"YOLO color classification error: {e}")
+                logger.error(f"Unexpected error in YOLO color classification: {e}", exc_info=True)
                 # Fall through to RGB fallback
         
         # FALLBACK: Use RGB template matching if classification model unavailable or fails
@@ -607,8 +615,11 @@ class AIVisionSystem:
                                 iou=YOLO_IOU_THRESHOLD,
                                 max_det=YOLO_MAX_DETECTIONS
                             )
+                        except (RuntimeError, AttributeError) as e:
+                            logger.error(f"YOLO inference error: {e}")
+                            results = None
                         except Exception as e:
-                            print(f"YOLO inference error: {e}")
+                            logger.error(f"Unexpected YOLO inference error: {e}", exc_info=True)
                             results = None
                         
                         if results and len(results) > 0 and len(results[0].boxes) > 0:
@@ -679,8 +690,11 @@ class AIVisionSystem:
                     # YOLO-only mode: no other detection methods
                     # If YOLO is not available, return empty detections
                 
+                except (RuntimeError, rs.error) as e:
+                    logger.warning(f"Error processing frame {sample_idx + 1}: {e}")
+                    continue
                 except Exception as e:
-                    print(f"Error processing frame {sample_idx + 1}: {e}")
+                    logger.error(f"Unexpected error processing frame {sample_idx + 1}: {e}", exc_info=True)
                     continue
             
             # Remove duplicates - keep highest confidence for similar objects
@@ -711,21 +725,22 @@ class AIVisionSystem:
                 if not found_similar:
                     final_detections.append(det)
             
-            # Print what YOLO detected (for debugging/feedback)
+            # Log what YOLO detected (for debugging/feedback)
             if final_detections:
-                print(f"  YOLO scan found {len(final_detections)} objects:")
+                logger.info(f"YOLO scan found {len(final_detections)} objects:")
                 for i, det in enumerate(final_detections, 1):
-                    # Print object type (PRIMARY) and color (SECONDARY, for display)
+                    # Log object type (PRIMARY) and color (SECONDARY, for display)
                     obj_type = det.get('class', 'unknown')
                     color_info = f" ({det['color']})" if det.get('color') else ""
-                    print(f"    {i}. {obj_type}{color_info} (conf: {det['confidence']:.2f}, pos: {det['position']})")
+                    logger.info(f"  {i}. {obj_type}{color_info} (conf: {det['confidence']:.2f}, pos: {det['position']})")
             
             return final_detections
             
+        except (RuntimeError, rs.error) as e:
+            logger.error(f"AI Vision scan error: {e}")
+            return []
         except Exception as e:
-            print(f"AI Vision scan error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Unexpected AI Vision scan error: {e}", exc_info=True)
             return []
     
     def verify_gripper_object(self, roi: np.ndarray, expected_object_type: str) -> Tuple[bool, float]:
@@ -757,8 +772,11 @@ class AIVisionSystem:
                 return (is_correct, 0.5)  # Default confidence if can't get from YOLO
             
             return (False, 0.0)
+        except (RuntimeError, AttributeError) as e:
+            logger.error(f"Verification error: {e}")
+            return (False, 0.0)
         except Exception as e:
-            print(f"Verification error: {e}")
+            logger.error(f"Unexpected verification error: {e}", exc_info=True)
             return (False, 0.0)
     
     def cleanup(self):
@@ -766,8 +784,10 @@ class AIVisionSystem:
         if self.pipeline:
             try:
                 self.pipeline.stop()
-            except Exception:
-                pass
+            except (RuntimeError, rs.error) as e:
+                logger.warning(f"Error stopping pipeline: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error stopping pipeline: {e}")
 
 
 def create_ai_vision_system(pipeline: Optional[rs.pipeline] = None, 
@@ -787,18 +807,20 @@ def create_ai_vision_system(pipeline: Optional[rs.pipeline] = None,
 
 if __name__ == '__main__':
     # Test the AI vision system
-    print("Testing AI Vision System...")
+    logging.basicConfig(level=logging.INFO)
+    logger.info("Testing AI Vision System...")
     vision = AIVisionSystem()
     
     try:
-        print("Scanning scene with AI model...")
+        logger.info("Scanning scene with AI model...")
         detections = vision.scan_scene(num_samples=3)
         
-        print(f"\nDetected {len(detections)} objects:")
+        logger.info(f"\nDetected {len(detections)} objects:")
         for i, det in enumerate(detections, 1):
-            print(f"  {i}. {det['color']} - Confidence: {det['confidence']:.2f} - "
+            color = det.get('color', 'unknown')
+            logger.info(f"  {i}. {color} - Confidence: {det['confidence']:.2f} - "
                   f"Position: {det['position']} - Depth: {det['depth']:.3f}m")
         
     finally:
         vision.cleanup()
-        print("\nTest complete.")
+        logger.info("\nTest complete.")

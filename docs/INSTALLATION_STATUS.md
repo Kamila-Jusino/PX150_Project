@@ -60,7 +60,7 @@ source ~/interbotix_ws/install/setup.bash
 python3 src/color_picking_game_pygame.py
 ```
 
-**Note**: The game uses YOLO by default. Difficulty can be set with 1/2/3 keys during gameplay, but currently does not affect target selection (always random).
+**Note**: The game uses YOLO by default. Target selection is always random from detected object types.
 
 ## Installation Commands (for reference)
 

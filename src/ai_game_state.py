@@ -19,7 +19,6 @@ class AIGameState:
         self.available_object_types = set()  # Object types available based on AI detections (PRIMARY)
         self.available_colors = set()  # Colors available based on AI detections (SECONDARY, for display)
         self.removed_objects = []  # Track removed objects
-        # self.difficulty = 'normal'  # DISABLED: Difficulty feature removed
     
     def update_from_ai_scan(self, ai_detections):
         """
@@ -40,37 +39,20 @@ class AIGameState:
         
         return len(self.detected_objects)
     
-    def ai_select_target(self, difficulty='normal'):
+    def ai_select_target(self):
         """
         AI-driven target selection based on object types (not colors).
         
         Game logic depends on AI's object inventory to select targets.
         This function makes decisions based on AI-maintained state.
         
-        Args:
-            difficulty: 'easy', 'normal', 'hard' (IGNORED - always uses random selection)
-            
         Returns:
             Selected object type (e.g., 'bottle', 'cup', 'block') or None
         """
-        # self.difficulty = difficulty  # DISABLED: Difficulty feature removed
-        
         if not self.available_object_types:
             return None
         
-        # AI-driven selection logic: Always random selection (difficulty disabled)
-        # object_counts = Counter(obj['class'] for obj in self.detected_objects if obj.get('class'))
-        
-        # if difficulty == 'hard':
-        #     # Select least common object type (more challenging)
-        #     if object_counts:
-        #         return min(object_counts, key=object_counts.get)
-        # elif difficulty == 'easy':
-        #     # Select most common object type (easier)
-        #     if object_counts:
-        #         return max(object_counts, key=object_counts.get)
-        # else:  # normal
-        # Random selection from AI-detected object types (always used now)
+        # Random selection from AI-detected object types
         return random.choice(list(self.available_object_types))
     
     def remove_object_by_type(self, object_type):

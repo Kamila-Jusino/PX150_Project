@@ -18,8 +18,7 @@ This project implements an AI-enhanced color picking game that uses **pretrained
 - **When**: After AI scan completes
 - **What happens**:
   - `AIGameState.ai_select_target()` analyzes AI detections
-  - **Currently**: Always selects randomly from AI-detected object types (difficulty parameter is ignored)
-  - **Note**: Difficulty setting (1/2/3 keys) exists in UI but is not used in selection logic
+  - **Currently**: Always selects randomly from AI-detected object types
 - **AI Integration**: Target selection depends entirely on AI's object inventory
 
 ### Step 3: Player Controls Arm
@@ -140,7 +139,7 @@ source ~/interbotix_ws/install/setup.bash
 python3 src/color_picking_game_pygame.py
 ```
 
-**Note**: The game uses YOLO by default. Difficulty can be set with 1/2/3 keys during gameplay, but currently does not affect target selection (always random).
+**Note**: The game uses YOLO by default. Target selection is always random from detected object types.
 
 ## 🎯 Key Features
 
@@ -178,6 +177,6 @@ python3 src/color_picking_game_pygame.py
 - Model inference runs on CPU by default (GPU if available)
 - AI scan uses 3 frames (optimized for speed, takes ~1-2 seconds)
 - Verification uses 5 frames with majority voting (3/5 samples must agree)
-- Target selection is always random (difficulty setting exists but is not used)
+- Target selection is always random from detected object types
 - Controls: 'N' for new round, 'C' for check object, 'H' for home, 'Z'/'X' for gripper
 
