@@ -33,7 +33,7 @@ Execution Time: 15.57s
 ### ✅ Color Classification (3/3 passing)
 - HSV Color Classification (Skipped - in game script)
 - AI Color Classification
-- Verify Gripper Object
+- Verify ROI Object
 
 ### ✅ Game State Management (9/9 passing)
 - Update Game State from Empty Scan

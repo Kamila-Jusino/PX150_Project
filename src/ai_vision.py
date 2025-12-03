@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 import pyrealsense2 as rs
 from typing import List, Dict, Optional, Tuple
+import os
 
 # Try to import YOLO (ultralytics) - primary choice
 try:
@@ -39,6 +40,9 @@ COLOR_NAMES = ['RED', 'GREEN', 'BLUE', 'YELLOW', 'ORANGE', 'PURPLE']
 # Block-like classes that YOLO might detect (will be mapped to 'block')
 BLOCK_LIKE_CLASSES = ['bottle', 'cup', 'book', 'remote', 'mouse', 'keyboard', 'cell phone', 'laptop']
 # -------------------------------
+
+# Get the models directory path (relative to this file)
+MODEL_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
 
 
 class AIVisionSystem:
@@ -73,7 +77,7 @@ class AIVisionSystem:
             print("Loading YOLOv8 pretrained model (optimized for speed)...")
             try:
                 # Use YOLOv8n (nano) for faster processing
-                self.model = YOLO('yolov8n.pt')  # Nano model for speed (object detection)
+                self.model = YOLO(os.path.join(MODEL_DIR, 'yolov8n.pt'))  # Nano model for speed (object detection)
                 self.model_type = 'yolo'
                 print("✓ YOLO detection model loaded successfully (yolov8n for fast detection)")
             except Exception as e:
@@ -85,12 +89,12 @@ class AIVisionSystem:
                 try:
                     # Try to load fine-tuned model first (if available)
                     try:
-                        self.color_model = YOLO('yolo_colors.pt')
+                        self.color_model = YOLO(os.path.join(MODEL_DIR, 'yolo_colors.pt'))
                         self.color_class_names = ['RED', 'GREEN', 'BLUE', 'YELLOW', 'ORANGE', 'PURPLE']
                         print("✓ Fine-tuned YOLO color classifier loaded")
                     except:
                         # Fallback to pretrained classification model
-                        self.color_model = YOLO('yolov8n-cls.pt')
+                        self.color_model = YOLO(os.path.join(MODEL_DIR, 'yolov8n-cls.pt'))
                         self.color_class_names = None  # Will use ImageNet classes (not ideal, but works)
                         print("✓ Pretrained YOLO color classifier loaded (yolov8n-cls)")
                         print("  Note: Consider fine-tuning for better color accuracy")

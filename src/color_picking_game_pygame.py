@@ -231,7 +231,7 @@ class ColorPickingGame:
         # AI Integration: AI picks target OBJECT TYPE (random selection)
         if num_objects > 0:
             # Target selection: randomly selects from detected object types
-            # (Difficulty feature disabled - always uses random selection)
+           
             ai_target_object = self.ai_game_state.ai_select_target('normal')  # Parameter ignored, always random
             if ai_target_object:
                 self.current_target = ai_target_object  # PRIMARY: Object type (AI-driven)
