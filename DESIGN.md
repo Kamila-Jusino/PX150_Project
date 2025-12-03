@@ -169,13 +169,13 @@ graph TB
 - **Responsibilities**:
   - Initialize all subsystems (camera, robot, AI, UI)
   - Manage main game loop
-  - Handle keyboard events
+  - Handle keyboard events (N: new round, C: check object, H: home, Z/X: gripper, W/S/A/D/Q/E/R/F/T/G: joints)
   - Coordinate between AI vision, game state, and robot control
   - Render UI updates
 - **Key Methods**:
-  - `start_new_round()`: Initiates AI scan and target selection
-  - `check_color_in_box()`: Verifies object using AI
-  - `run()`: Main event loop
+  - `start_new_round()`: Initiates AI scan (3 frames) and target selection
+  - `check_color_in_box()`: Verifies object in ROI using AI (5 frames, majority voting)
+  - `run()`: Main event loop (60 FPS display, 30 FPS camera)
 
 #### AI Vision System (`AIVisionSystem`)
 - **File**: `src/ai_vision.py`
@@ -250,7 +250,7 @@ Game Ready
 User Presses 'N' (New Round)
     ↓
 AI Vision System: scan_scene()
-    ├─→ Capture 3 camera frames
+    ├─→ Capture 3 camera frames (optimized for speed, reduced from 5 to avoid hanging)
     ├─→ Run YOLO inference on each frame
     ├─→ Extract bounding boxes + confidence scores
     ├─→ Combine with depth data
@@ -270,7 +270,7 @@ User Controls Robot (Keyboard Input)
     ├─→ Joint movements (W/S, A/D, Q/E, R/F, T/G)
     └─→ Gripper control (Z/X)
     ↓
-User Presses 'C' (Check Object)
+User Presses 'C' (Check Object in ROI)
     ↓
 AI Vision System: verify_gripper_object()
     ├─→ Capture 5 frames from ROI
@@ -301,7 +301,7 @@ Main Loop: draw_ui()
     └─→ Draw visual effects (if any)
     ↓
 Pygame: display.flip()
-    └─→ Update screen (60 FPS)
+    └─→ Update screen (30 FPS)
 ```
 
 ### 4. Robot Control Flow
@@ -318,9 +318,9 @@ Main Controller: Event Handler
     │   └─→ X: robot.gripper.release()
     │
     └─→ Special Keys (N, C, H, ESC)
-        ├─→ N: start_new_round()
-        ├─→ C: check_color_in_box()
-        ├─→ H: go_to_home()
+        ├─→ N: start_new_round() (initiates AI scan)
+        ├─→ C: check_color_in_box() (verifies object in ROI)
+        ├─→ H: go_to_home() (moves robot to home position)
         └─→ ESC: quit()
     ↓
 Robot Executes Command
@@ -346,6 +346,7 @@ Feedback to UI (Status Message)
 - **Decision**: Sample 5 frames and require 3/5 agreement for verification
 - **Rationale**: Reduces false positives from single-frame noise
 - **Implementation**: `SAMPLES_FOR_CONFIRM = 5`, `SAMPLES_MAJORITY = 3`
+- **Note**: AI scan uses 3 frames (optimized for speed), verification uses 5 frames (higher confidence needed)
 
 ### 4. Modular Component Design
 - **Decision**: Separate AI vision, game state, and main controller into distinct classes
@@ -353,9 +354,13 @@ Feedback to UI (Status Message)
 - **Structure**: `AIVisionSystem`, `AIGameState`, `ColorPickingGame`
 
 ### 5. Real-Time Performance Optimization
-- **Decision**: Use YOLOv8 nano (smallest model), reduce image size to 640px
+- **Decision**: Use YOLOv8 nano (smallest model), reduce image size to 640px, limit scan to 3 frames
 - **Rationale**: Balance between accuracy and real-time performance (30 FPS camera)
 - **Trade-off**: Slightly lower accuracy for faster inference
+- **Implementation**: 
+  - `YOLO_IMAGE_SIZE = 640` (optimized for speed)
+  - `scan_scene(num_samples=3)` (reduced from 5 to avoid hanging)
+  - Verification still uses 5 samples for higher confidence
 
 ---
 
@@ -367,9 +372,12 @@ Feedback to UI (Status Message)
 3. **Camera-Robot Calibration**: Manual alignment (no automatic calibration)
 
 ### AI Model Integration
-1. **YOLO Loading**: Models loaded from `models/` directory at startup
+1. **YOLO Loading**: Models loaded from `models/` directory at startup (relative path: `../models/`)
 2. **Inference Pipeline**: Frames → Preprocessing → YOLO inference → Post-processing
-3. **Result Format**: Standardized dictionary format for detections
+3. **Result Format**: Standardized dictionary format for detections: `{class, color, position, depth, confidence, bbox}`
+4. **Model Files**: 
+   - `yolov8n.pt`: Primary object detection model (loaded from `models/yolov8n.pt`)
+   - `yolov8n-cls.pt`: Color classification fallback (loaded from `models/yolov8n-cls.pt`)
 
 ### UI Integration
 1. **Pygame Rendering**: Camera frames converted from NumPy arrays to Pygame surfaces
@@ -387,6 +395,101 @@ Feedback to UI (Status Message)
 5. **Performance Metrics**: FPS tracking, inference time monitoring
 
 ---
+
+## Key Tunable Parameters
+
+The following parameters can be adjusted to fine-tune system behavior:
+
+### AI Vision Parameters (`src/ai_vision.py`)
+```python
+DEPTH_THRESHOLD_M = 0.7        # Only detect objects within this depth (meters)
+MIN_CONFIDENCE = 0.2            # Minimum confidence for object detection
+YOLO_CONF_THRESHOLD = 0.1       # YOLO confidence threshold (very low for all objects)
+YOLO_IMAGE_SIZE = 640          # YOLO input image size (optimized for speed)
+YOLO_IOU_THRESHOLD = 0.5       # IoU threshold for non-maximum suppression
+YOLO_MAX_DETECTIONS = 500      # Maximum detections per image
+```
+
+### Game Control Parameters (`src/color_picking_game_pygame.py`)
+```python
+JOINT_STEP = 0.12              # Radians per keypress (robot movement increment)
+MOVING_TIME = 0.12             # Moving time for joint movements (seconds)
+ROI_PIXEL_MIN = 500            # Minimum color pixels for detection
+SAMPLES_FOR_CONFIRM = 5        # Number of frames to sample for verification
+SAMPLES_MAJORITY = 3            # Majority votes needed (3 out of 5 samples)
+```
+
+### Performance Parameters
+- **AI Scan**: 3 frames (optimized for speed, reduced from 5 to avoid hanging)
+- **Verification**: 5 frames with 3/5 majority voting (higher confidence needed)
+- **Camera**: 640x480 @ 30 FPS
+- **Display**: 60 FPS (Pygame refresh rate)
+
+These values govern AI detection sensitivity, depth filtering, robot movement speed, and overall system performance.
+
+---
+
+## File Structure
+
+The project follows this organized structure:
+
+```
+PX150_Project/
+├── README.md                      # Main project documentation
+├── requirements.txt               # Python dependencies
+├── DESIGN.md                     # This file - design documentation
+│
+├── src/                          # Main source code
+│   ├── color_picking_game_pygame.py   # Main game controller
+│   ├── ai_vision.py              # AI vision system (YOLOv8)
+│   └── ai_game_state.py          # Game state management
+│
+├── models/                       # AI model files
+│   ├── yolov8n.pt               # YOLOv8 nano object detection model
+│   ├── yolov8n-cls.pt           # YOLOv8 nano classification model
+│   └── yolov8s.pt                # YOLOv8 small model (optional)
+│
+├── tests/                        # Test files and results
+│   ├── test_ai_system.py         # AI system tests
+│   ├── test_dependencies.py      # Dependency verification
+│   └── test_results_*.log         # Test result logs
+│
+├── docs/                         # Documentation
+│   ├── AI_INTEGRATION.md         # AI integration guide
+│   ├── TEST_SUMMARY.md           # Test results summary
+│   ├── TESTING_DOCUMENTATION.md  # Comprehensive testing docs
+│   ├── INSTALLATION_STATUS.md    # Installation guide
+│   └── YOLO_CLASSIFICATION_INTEGRATION.md
+│
+└── scripts/                      # Shell scripts
+    ├── run_arm.sh                # Launch robot arm
+    └── run_game_pygame.sh        # Launch game interface
+```
+
+## Controls Reference
+
+### Robot Joint Controls
+| Key | Action |
+|-----|--------|
+| Q/A | Shoulder rotation ± |
+| W/S | Shoulder pitch ± |
+| E/D | Elbow ± |
+| R/F | Wrist angle ± |
+| T/G | Wrist rotation ± |
+
+### Gripper Controls
+| Key | Action |
+|-----|--------|
+| Z | Close gripper |
+| X | Open gripper |
+
+### Game Controls
+| Key | Action |
+|-----|--------|
+| N | Start new round (AI scan) |
+| C | Check object in ROI (verification) |
+| H | Move robot to home position |
+| Esc | Quit application |
 
 ## References
 

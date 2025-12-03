@@ -18,10 +18,8 @@ This project implements an AI-enhanced color picking game that uses **pretrained
 - **When**: After AI scan completes
 - **What happens**:
   - `AIGameState.ai_select_target()` analyzes AI detections
-  - Selects target based on difficulty:
-    - **Easy**: Most common color (easier)
-    - **Normal**: Random from AI-detected colors
-    - **Hard**: Least common color (challenging)
+  - **Currently**: Always selects randomly from AI-detected object types (difficulty parameter is ignored)
+  - **Note**: Difficulty setting (1/2/3 keys) exists in UI but is not used in selection logic
 - **AI Integration**: Target selection depends entirely on AI's object inventory
 
 ### Step 3: Player Controls Arm
@@ -33,12 +31,13 @@ This project implements an AI-enhanced color picking game that uses **pretrained
 - **Note**: This is human-controlled, but game can't progress without AI
 
 ### Step 4: AI Verifies Grab
-- **When**: Player presses SPACE after closing gripper
+- **When**: Player presses 'C' key to check object in ROI
 - **What happens**:
-  - Captures object in gripper
-  - Runs through pretrained AI model again
-  - AI determines: "Is the object in gripper the correct class?"
+  - Captures 5 frames from ROI (center third of image)
+  - Runs through pretrained AI model on each frame
+  - AI determines: "Is the object in ROI the correct class?"
   - Uses `AIVisionSystem.verify_gripper_object()` with AI classification
+  - Uses majority voting: requires 3 out of 5 samples to agree
 - **AI Integration**: Uses same pretrained model for verification
 
 ### Step 5: Scoring & Next Round
@@ -94,9 +93,9 @@ The following code sections are AI-connected:
    - `ai_select_target()`: AI-driven target selection
    - `remove_object_by_color()`: Updates AI inventory
 
-6. **Main Game Loop** (`color_picking_game_ai.py`)
-   - `ai_scan_board()`: Initiates AI scan
-   - `ai_verify_grab()`: Uses AI for verification
+6. **Main Game Loop** (`src/color_picking_game_pygame.py`)
+   - `start_new_round()`: Initiates AI scan (3 frames)
+   - `check_color_in_box()`: Uses AI for verification (5 frames, majority voting)
    - All game logic depends on AI state
 
 **Total AI Integration**: ~60% of codebase is AI-connected
@@ -104,12 +103,18 @@ The following code sections are AI-connected:
 ## 📁 File Structure
 
 ```
-px150_game/
-├── ai_vision.py              # AI vision system with pretrained models
-├── ai_game_state.py          # AI-driven game state management
-├── color_picking_game_ai.py  # Main AI-enhanced game
-├── run_game_ai.sh           # Run script for AI game
-└── AI_INTEGRATION.md         # This file
+PX150_Project/
+├── src/
+│   ├── ai_vision.py              # AI vision system with pretrained models
+│   ├── ai_game_state.py          # AI-driven game state management
+│   └── color_picking_game_pygame.py  # Main AI-enhanced game
+├── models/
+│   ├── yolov8n.pt                # YOLOv8 nano object detection model
+│   └── yolov8n-cls.pt            # YOLOv8 nano classification model
+├── scripts/
+│   └── run_game_pygame.sh        # Run script for game
+└── docs/
+    └── AI_INTEGRATION.md         # This file
 ```
 
 ## 🚀 Running the Game
@@ -124,18 +129,18 @@ pip install ultralytics torch torchvision opencv-python numpy pygame pyrealsense
 ### Run AI-Enhanced Game
 
 ```bash
-./run_game_ai.sh
+./scripts/run_game_pygame.sh
 ```
 
 Or directly:
 ```bash
-python3 color_picking_game_ai.py --difficulty normal --model yolo
+cd /path/to/PX150_Project
+source /opt/ros/humble/setup.bash
+source ~/interbotix_ws/install/setup.bash
+python3 src/color_picking_game_pygame.py
 ```
 
-### Options
-
-- `--difficulty`: `easy`, `normal`, `hard`
-- `--model`: `yolo` (recommended) or `mobilenet`
+**Note**: The game uses YOLO by default. Difficulty can be set with 1/2/3 keys during gameplay, but currently does not affect target selection (always random).
 
 ## 🎯 Key Features
 
@@ -169,8 +174,10 @@ python3 color_picking_game_ai.py --difficulty normal --model yolo
 
 ## 📝 Notes
 
-- First run downloads YOLO model (~6MB)
+- Models are loaded from `models/` directory (yolov8n.pt, yolov8n-cls.pt)
 - Model inference runs on CPU by default (GPU if available)
-- AI scan takes 2-3 seconds (samples 5 frames)
-- Verification uses majority voting (3/5 samples must agree)
+- AI scan uses 3 frames (optimized for speed, takes ~1-2 seconds)
+- Verification uses 5 frames with majority voting (3/5 samples must agree)
+- Target selection is always random (difficulty setting exists but is not used)
+- Controls: 'N' for new round, 'C' for check object, 'H' for home, 'Z'/'X' for gripper
 

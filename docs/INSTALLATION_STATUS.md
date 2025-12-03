@@ -14,15 +14,16 @@
 - ✅ **ultralytics**: 8.3.233
 
 ### Pretrained Models
-- ✅ **YOLOv8n**: Downloaded and ready (`yolov8n.pt`)
+- ✅ **YOLOv8n**: Downloaded and ready (`models/yolov8n.pt`)
+- ✅ **YOLOv8n-cls**: Classification model (`models/yolov8n-cls.pt`)
 
 ## Installation Summary
 
 All required dependencies have been installed and verified:
 
 1. **YOLO/Ultralytics**: Installed and tested ✓
-   - Model file downloaded: `yolov8n.pt` (6.2 MB)
-   - Ready for object detection
+   - Model files in `models/` directory: `yolov8n.pt`, `yolov8n-cls.pt`
+   - Ready for object detection and classification
 
 2. **PyTorch**: Installed (CPU version) ✓
    - Compatible with ultralytics
@@ -40,7 +41,7 @@ All required dependencies have been installed and verified:
 
 Run the test script to verify everything:
 ```bash
-python3 test_dependencies.py
+python3 tests/test_dependencies.py
 ```
 
 ## Ready to Run
@@ -48,13 +49,18 @@ python3 test_dependencies.py
 You can now start the AI-enhanced game:
 
 ```bash
-./run_game_ai.sh
+./scripts/run_game_pygame.sh
 ```
 
 Or directly:
 ```bash
-python3 color_picking_game_ai.py --difficulty normal --model yolo
+cd /path/to/PX150_Project
+source /opt/ros/humble/setup.bash
+source ~/interbotix_ws/install/setup.bash
+python3 src/color_picking_game_pygame.py
 ```
+
+**Note**: The game uses YOLO by default. Difficulty can be set with 1/2/3 keys during gameplay, but currently does not affect target selection (always random).
 
 ## Installation Commands (for reference)
 
@@ -71,14 +77,14 @@ pip3 install ultralytics torch torchvision opencv-python numpy pygame pyrealsens
 ## Notes
 
 - **CPU Version**: PyTorch is installed as CPU-only version. If you have a GPU and want CUDA support, install the CUDA version separately.
-- **YOLO Model**: The model file (`yolov8n.pt`) is downloaded automatically on first use and saved locally.
+- **YOLO Models**: Model files are in the `models/` directory. If missing, YOLO will attempt to download them automatically on first use.
 - **First Run**: The first time you run the game, YOLO will download the model if it's not already present.
 
 ## Troubleshooting
 
 If you encounter any issues:
 
-1. **Test dependencies**: `python3 test_dependencies.py`
+1. **Test dependencies**: `python3 tests/test_dependencies.py`
 2. **Reinstall**: `pip3 install --upgrade -r requirements.txt`
 3. **Check Python version**: Requires Python 3.8+
 
