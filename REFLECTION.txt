@@ -1,9 +1,37 @@
-Using AI tools such as Cursor and ChatGPT massively sped up our development time because we would have spent much more time researching without them. By using AI to help us not only write code but also walk us through the actual development steps, we were able to move faster and understand the project more clearly. It was also extremely helpful to talk with an AI chat and bounce around ideas about feasibility, especially in relation to our time frame and experience level. 
+Using AI tools such as Cursor and ChatGPT massively sped up our development time because we
+would have spent much more time researching without them. By using AI to help us not only
+write code but also walk us through the actual development steps, we were able to move faster
+and understand the project more clearly. It was also extremely helpful to talk with an AI chat
+and bounce around ideas about feasibility, especially in relation to our time frame and
+experience level.
 
-However, even with all the benefits, there were definitely drawbacks. Even though AI helped with coding, it often provided incorrect or nonfunctional code, which ended up costing us more time in the testing phase than if we had written everything ourselves. Something I have become passionate about is that AI is nowhere near as reliable as good, comprehensive documentation. 
+However, even with all the benefits, there were definitely drawbacks. Even though AI helped
+with coding, it often provided incorrect or nonfunctional code, which ended up costing us more
+time in the testing phase than if we had written everything ourselves. Something I have
+become passionate about is that AI is nowhere near as reliable as good, comprehensive
+documentation.
 
-For example, when we first used the Linux machine, we relied completely on ChatGPT to help us install all the Interbotix packages and get started with the PX150. We spent multiple hours following that method, and it ultimately led us nowhere. It even often times led us in circles. After all of our Linux installations were wiped, we decided to follow the official documentation instead. The Trossen Robotics documentation is very well written, and they also provide several videos that show both the hardware setup and the software workflow. By following the documentation, we were able to run Python Perception, tune the Perception Pipeline, and use several of their demo scripts. If we had continued using ChatGPT for that part of the project, we would never have gained the extra learning that the documentation and videos provided. It also gave us much more confidence working with the arm and taught us concepts like torque, which were extremely useful during testing and development. I do not think we would have learned those skills by blindly following AI instructions. 
+For example, when we first used the Linux machine, we relied completely on ChatGPT to help
+us install all the Interbotix packages and get started with the PX150. We spent multiple
+hours following that method, and it ultimately led us nowhere. It even often times led us in
+circles. After all of our Linux installations were wiped, we decided to follow the official
+documentation instead. The Trossen Robotics documentation is very well written, and they
+also provide several videos that show both the hardware setup and the software workflow.
+By following the documentation, we were able to run Python Perception, tune the Perception
+Pipeline, and use several of their demo scripts. If we had continued using ChatGPT for that
+part of the project, we would never have gained the extra learning that the documentation
+and videos provided. It also gave us much more confidence working with the arm and taught
+us concepts like torque, which were extremely useful during testing and development. I do
+not think we would have learned those skills by blindly following AI instructions.
 
-The most challenging technical part of the project was working with Linux and installing all the packages, mostly because we chose to follow AI directions without understanding them. A major lesson we learned is to never rely on AI tools without knowing how to verify what they are telling you, especially when working with new technologies where you cannot immediately recognize mistakes. This experience also showed us how important it is to build real skills in your own tool set. While ChatGPT and Cursor helped us with coding and some machine level issues later in the project, you cannot depend on them to do your job. People who create only through AI tools do not actually learn. These tools are meant to assist, not replace the thinking and understanding that should come from the developer. 
+The most challenging technical part of the project was working with Linux and installing all
+the packages, mostly because we chose to follow AI directions without understanding them.
+A major lesson we learned is to never rely on AI tools without knowing how to verify what
+they are telling you, especially when working with new technologies where you cannot
+immediately recognize mistakes. This experience also showed us how important it is to build
+real skills in your own tool set. While ChatGPT and Cursor helped us with coding and some
+machine level issues later in the project, you cannot depend on them to do your job. People
+who create only through AI tools do not actually learn. These tools are meant to assist, not
+replace the thinking and understanding that should come from the developer.
 
 
