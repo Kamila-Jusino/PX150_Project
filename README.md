@@ -163,10 +163,6 @@ PX150_Project/
     └── run_game_pygame.sh        # Launch game interface
 ```
 
-## Acknowledgments
 
-- Interbotix Robotics for the PX150 SDK
-- Intel RealSense for depth camera support
-- AI tools (ChatGPT & Cursor) for code development assistance
 
   
