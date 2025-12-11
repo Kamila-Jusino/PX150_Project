@@ -17,7 +17,7 @@ The following table documents the specific AI tools used throughout the developm
 | **Cursor (AI-Powered IDE)** | Code generation, refactoring, debugging, and project restructuring | Throughout entire codebase | Primary development assistant for: <br>- Generating initial game loop structure<br>- Refactoring code for better organization<br>- Fixing import paths after restructuring<br>- Debugging integration issues between components<br>- Writing documentation and comments |
 | **ChatGPT** | Design consultation, algorithm design, and code review | Architecture design, AI integration logic | Used for: <br>- Initial project architecture planning<br>- AI model integration strategy (YOLO vs MobileNet)<br>- Game state management design patterns<br>- RealSense camera integration guidance<br>- ROS2/Interbotix SDK integration help |
 | **YOLOv8 (Ultralytics)** | Object detection and classification model | `src/ai_vision.py` - Model inference | Pretrained AI model for: <br>- Real-time object detection (yolov8n.pt)<br>- Object classification (yolov8n-cls.pt)<br>- Bounding box generation with confidence scores<br>- Primary AI component meeting 50%+ AI integration requirement |
-| **Hugging Face (Indirect)** | Model architecture reference | Model selection research | Used for: <br>- Researching pretrained model options<br>- Understanding YOLO model variants<br>- Performance comparison between models |
+
 
 ### AI Tool Contribution Summary
 
@@ -27,66 +27,9 @@ The following table documents the specific AI tools used throughout the developm
 
 ---
 
-## Architecture Diagram
 
-The following diagram illustrates the system architecture, component interactions, and data flow between hardware and software components.
 
-```mermaid
-graph TB
-    subgraph Hardware["Hardware Layer"]
-        CAM[Intel RealSense Camera<br/>RGB-D Stream]
-        ROBOT[Interbotix PX150<br/>Robotic Arm]
-    end
-    
-    subgraph Software["Software Layer"]
-        subgraph Main["Main Game Controller<br/>(color_picking_game_pygame.py)"]
-            GAME[ColorPickingGame Class<br/>- Event handling<br/>- Game loop<br/>- UI rendering]
-        end
-        
-        subgraph AI["AI Vision System<br/>(ai_vision.py)"]
-            YOLO[YOLOv8 Model<br/>- Object Detection<br/>- Classification]
-            VISION[AIVisionSystem<br/>- scan_scene()<br/>- verify_gripper_object()<br/>- classify_color_ai()]
-        end
-        
-        subgraph State["Game State Manager<br/>(ai_game_state.py)"]
-            STATE[AIGameState<br/>- update_from_ai_scan()<br/>- ai_select_target()<br/>- remove_object_by_type()]
-        end
-        
-        subgraph UI["User Interface<br/>(Pygame)"]
-            DISPLAY[Pygame Window<br/>- Camera feed<br/>- Status display<br/>- Controls overlay]
-        end
-        
-        subgraph Control["Robot Controller<br/>(Interbotix SDK)"]
-            ARM[InterbotixManipulatorXS<br/>- Joint control<br/>- Gripper control<br/>- Home position]
-        end
-    end
-    
-    %% Data Flow
-    CAM -->|RGB + Depth Frames| GAME
-    GAME -->|Frames| VISION
-    VISION -->|Model Inference| YOLO
-    YOLO -->|Detections + Bounding Boxes| VISION
-    VISION -->|Object List| STATE
-    STATE -->|Target Selection| GAME
-    GAME -->|Display Data| DISPLAY
-    GAME -->|Control Commands| ARM
-    ARM -->|Joint Positions| ROBOT
-    GAME -->|Keyboard Events| DISPLAY
-    
-    %% User Interaction
-    DISPLAY -.->|User Input| GAME
-    
-    style CAM fill:#e1f5ff
-    style ROBOT fill:#e1f5ff
-    style YOLO fill:#ffeb3b
-    style VISION fill:#c8e6c9
-    style STATE fill:#c8e6c9
-    style GAME fill:#fff9c4
-    style DISPLAY fill:#f3e5f5
-    style ARM fill:#ffccbc
-```
-
-### Alternative Text-Based Architecture Diagram
+###  Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
