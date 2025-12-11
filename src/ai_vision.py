@@ -2,7 +2,7 @@
 """
 AI Vision System
 Provides AI-driven object detection and classification using pretrained models.
-Uses YOLO (ultralytics) or MobileNet for object detection and color classification.
+Uses YOLO (ultralytics) for object detection and color classification.
 """
 
 import cv2
@@ -10,6 +10,10 @@ import numpy as np
 import pyrealsense2 as rs
 from typing import List, Dict, Optional, Tuple
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 # Try to import YOLO (ultralytics) - primary choice
 try:
@@ -17,16 +21,6 @@ try:
     YOLO_AVAILABLE = True
 except ImportError:
     YOLO_AVAILABLE = False
-
-# Fallback to MobileNet if YOLO not available
-MOBILENET_AVAILABLE = False
-try:
-    import torch
-    import torchvision.transforms as transforms
-    from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
-    MOBILENET_AVAILABLE = True
-except ImportError:
-    pass
 
 # ----- TUNABLE PARAMETERS -----
 DEPTH_THRESHOLD_M = 0.7   # meters, only detect close objects
@@ -48,7 +42,7 @@ MODEL_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
 class AIVisionSystem:
     """
     AI-driven vision system using pretrained models for object detection.
-    Uses YOLO or MobileNet for detection and classification.
+    Uses YOLO for detection and classification.
     """
     
     def __init__(self, pipeline: Optional[rs.pipeline] = None, model_type: str = 'yolo'):
@@ -57,20 +51,12 @@ class AIVisionSystem:
         
         Args:
             pipeline: Optional RealSense pipeline (if None, creates new one)
-            model_type: 'yolo' or 'mobilenet'
+            model_type: 'yolo'
         """
         self.pipeline = pipeline
         self.depth_scale = 0.001
         self.model = None
         self.model_type = None
-        if MOBILENET_AVAILABLE:
-            try:
-                import torch
-                self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            except ImportError:
-                self.device = None
-        else:
-            self.device = None
         
         # Initialize AI model
         if model_type == 'yolo' and YOLO_AVAILABLE:
@@ -109,31 +95,6 @@ class AIVisionSystem:
                     self.color_model = None
             else:
                 self.color_model = None
-        
-        if self.model is None and MOBILENET_AVAILABLE:
-            print("Loading MobileNetV2 pretrained model...")
-            try:
-                self.model = mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1)
-                self.model.eval()
-                if self.device:
-                    self.model = self.model.to(self.device)
-                self.model_type = 'mobilenet'
-                # Preprocessing for MobileNet
-                self.transform = transforms.Compose([
-                    transforms.ToPILImage(),
-                    transforms.Resize(256),
-                    transforms.CenterCrop(224),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                      std=[0.229, 0.224, 0.225])
-                ])
-                logger.info("✓ MobileNet model loaded successfully")
-            except (ImportError, RuntimeError) as e:
-                logger.error(f"Failed to load MobileNet: {e}")
-                self.model = None
-            except Exception as e:
-                logger.error(f"Unexpected error loading MobileNet: {e}", exc_info=True)
-                self.model = None
         
         if self.model is None:
             logger.warning("WARNING: No AI model available. YOLO-only mode requires YOLO.")
@@ -790,15 +751,15 @@ class AIVisionSystem:
                 logger.warning(f"Unexpected error stopping pipeline: {e}")
 
 
-def create_ai_vision_system(pipeline: Optional[rs.pipeline] = None, 
+def create_ai_vision_system(pipeline: Optional[rs.pipeline] = None,
                             model_type: str = 'yolo') -> AIVisionSystem:
     """
     Factory function to create an AI vision system.
     
     Args:
         pipeline: Optional RealSense pipeline
-        model_type: 'yolo' or 'mobilenet'
-        
+        model_type: 'yolo'
+
     Returns:
         AIVisionSystem instance
     """
