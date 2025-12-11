@@ -1,0 +1,10 @@
+4. Reflection
+A written reflection (minimum ½ page, maximum 1 full page) covering:
+a. Utility Assessment: An analysis of whether the AI tools used were helpful, and how
+they impacted your team's development speed and code quality (positive and
+negative feedback).
+b. Learning Outcomes: What was the most challenging technical problem solved by
+the team, and what was the most valuable lesson learned about AI-assisted
+development?
+
+

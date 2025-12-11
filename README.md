@@ -11,7 +11,8 @@ This project implements an interactive object-picking game using the Interbotix 
 The user places colored objects within the camera's field of view. The game uses AI to scan the scene and selects a random target object type. The user uses the arm to move the target object into the detection region (ROI). When the correct object appears inside the Region of Interest (ROI) and the user presses 'C' to verify, the application:
 
 - Detects the object using YOLOv8 nano object detection model (AI-driven)
-- Classifies the object type and color using YOLOv8 models (with HSV fallback for color display)
+- Classifies the object type and color using YOLOv8 models (with RGB template matching fallback for color classification)
+- Uses HSV for display/info purposes in scan_scene(), not for game logic
 - Validates depth and object type using majority voting (5 samples, 3/5 agreement)
 - Triggers visual feedback (green flash for correct, red flash for wrong) in the Pygame interface
 - Increments the game score and assigns a new target object

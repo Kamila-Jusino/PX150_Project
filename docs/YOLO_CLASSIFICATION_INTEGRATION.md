@@ -18,7 +18,7 @@ Color classification has been upgraded from RGB template matching to **YOLOv8 cl
 
 ## Implementation Details
 
-### 1. Model Loading (`ai_vision.py: __init__`)
+### 1. Model Loading (`color_picking_game_pygame.py: __init__`)
 
 The system now loads two YOLO models:
 - **Detection model** (`yolov8n.pt`): Finds objects with bounding boxes
@@ -122,14 +122,13 @@ To test with AI classification:
 ## Code Changes Summary
 
 **Files Modified:**
-- `ai_vision.py`:
+- `color_picking_game_pygame.py`:
   - Added `color_model` initialization in `__init__`
   - Replaced `classify_color_ai()` to use YOLO classification
   - Renamed RGB matching to `_classify_color_rgb_fallback()`
   - Added progressive fallback system
 
 **No changes needed in:**
-- `color_picking_game_pygame.py` - Uses `classify_color_ai()` (unchanged interface)
 - `ai_game_state.py` - No changes needed
 - Other files - No changes needed
 
@@ -144,6 +143,5 @@ To test with AI classification:
 ---
 
 **Status**: ✅ Implementation Complete  
-**AI Integration**: Now truly 50%+ AI-driven (with fine-tuning)  
 **Current Behavior**: Works with RGB fallback, ready for fine-tuning
 

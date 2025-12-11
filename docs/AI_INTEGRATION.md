@@ -2,14 +2,14 @@
 
 ## Overview
 
-This project implements an AI-enhanced color picking game that uses **pretrained AI models** (YOLO/MobileNet) for object detection and verification. The game follows a complete AI-driven workflow where the game state, target selection, and verification all depend on AI model outputs.
+This project implements an AI-enhanced color picking game that uses **pretrained AI models** (YOLO) for object detection and verification. The game follows a complete AI-driven workflow where the game state, target selection, and verification all depend on AI model outputs.
 
-## 🎮 Gameplay Flow
+## Gameplay Flow
 
 ### Step 1: AI Scans the Board
 - **When**: At the start of each round (press 'N')
 - **What happens**: 
-  - AI vision system uses pretrained YOLO/MobileNet model to scan the scene
+  - AI vision system uses pretrained YOLO model to scan the scene
   - Detects all colored objects with bounding boxes and confidence scores
   - Builds an internal inventory: `[{color: "RED", confidence: 0.95, position: (x,y), depth: 0.5}, ...]`
 - **AI Integration**: Uses `AIVisionSystem.scan_scene()` which calls pretrained model inference
@@ -44,47 +44,49 @@ This project implements an AI-enhanced color picking game that uses **pretrained
 - **Wrong**: -5 points, object stays in inventory
 - Next round uses updated AI state (remaining objects)
 
-## 🤖 AI Model Integration
+##  AI Model Integration
 
 ### Pretrained Models Used
 
 1. **YOLOv8 (Primary)**
    - Downloads automatically via `ultralytics` package
-   - Model: `yolov8n.pt` (nano version for speed)
-   - Used for: Object detection with bounding boxes
-   - Falls back to HSV color classification for color identification
+   - Detection model: `yolov8n.pt` (nano version for speed)
+   - Classification model: `yolov8n-cls.pt` (for color classification)
+   - Used for: Object detection with bounding boxes and color classification
+   - Falls back to RGB template matching for color classification if YOLO classification fails
 
-2. **MobileNetV2 (Fallback)**
-   - Uses PyTorch's pretrained weights
-   - Model: `MobileNet_V2_Weights.IMAGENET1K_V1`
-   - Used for: General object classification
-   - Combined with HSV for color detection
+2. **RGB Template Matching (Fallback)**
+   - Used when YOLO classification model unavailable or fails
+   - Compares RGB statistics (mean, median, peak) against color templates
+   - Provides color detection but not "AI-driven"
 
-3. **HSV Color Classification (Fallback)**
-   - Used when AI models unavailable
-   - Still provides color detection but not "AI-driven"
+3. **HSV Color Extraction (Display Only)**
+   - Used in `scan_scene()` for display/info purposes only
+   - Not used for game logic or as a fallback
+   - Secondary feature for visualization
 
 ### AI Code Integration (50%+ Requirement)
 
 The following code sections are AI-connected:
 
-1. **Model Loading** (`ai_vision.py: __init__`)
-   - Loads pretrained YOLO/MobileNet models
+1. **Model Loading** (`color_picking_game_pygame.py: __init__`)
+   - Loads pretrained YOLO models (detection and classification)
    - Sets up inference pipeline
 
-2. **AI Inference** (`ai_vision.py: scan_scene`)
+2. **AI Inference** (`color_picking_game_pygame.py: scan_scene`)
    - Calls `model()` for object detection
    - Processes bounding boxes and confidence scores
    - Combines with depth information
 
-3. **Color Classification** (`ai_vision.py: classify_color_ai`)
-   - Uses AI model outputs for object classification
+3. **Color Classification** (`color_picking_game_pygame.py: classify_color_ai`)
+   - PRIMARY: Uses YOLO classification model (AI-driven)
+   - FALLBACK: RGB template matching if YOLO classification fails
    - Extracts ROIs from bounding boxes
-   - Classifies colors using AI + HSV
+   - HSV is used only for display/info in `scan_scene()`, not for classification
 
-4. **Verification** (`ai_vision.py: verify_gripper_object`)
+4. **Verification** (`color_picking_game_pygame.py: verify_gripper_object`)
    - Runs AI inference on gripper ROI
-   - Compares with expected color
+   - Compares with expected object type
    - Returns confidence score
 
 5. **Game State Management** (`ai_game_state.py`)
@@ -99,14 +101,14 @@ The following code sections are AI-connected:
 
 **Total AI Integration**: ~60% of codebase is AI-connected
 
-## 📁 File Structure
+##  File Structure
 
 ```
 PX150_Project/
 ├── src/
-│   ├── ai_vision.py              # AI vision system with pretrained models
-│   ├── ai_game_state.py          # AI-driven game state management
-│   └── color_picking_game_pygame.py  # Main AI-enhanced game
+│   ├── color_picking_game_pygame.py  # Main AI-enhanced game (contains AIVisionSystem)
+│   ├── ai_vision.py              # AI vision system (alternative/legacy)
+│   └── ai_game_state.py          # AI-driven game state management
 ├── models/
 │   ├── yolov8n.pt                # YOLOv8 nano object detection model
 │   └── yolov8n-cls.pt            # YOLOv8 nano classification model
@@ -116,7 +118,7 @@ PX150_Project/
     └── AI_INTEGRATION.md         # This file
 ```
 
-## 🚀 Running the Game
+##  Running the Game
 
 ### Prerequisites
 
@@ -141,42 +143,42 @@ python3 src/color_picking_game_pygame.py
 
 **Note**: The game uses YOLO by default. Target selection is always random from detected object types.
 
-## 🎯 Key Features
+##  Key Features
 
-✅ **Pretrained AI Models**: Uses YOLO/MobileNet (not custom training)  
+✅ **Pretrained AI Models**: Uses YOLO (not custom training)  
 ✅ **AI-Driven Game State**: Game can't progress without AI detections  
 ✅ **AI Target Selection**: Targets chosen based on AI inventory  
 ✅ **AI Verification**: Grabs verified by AI model inference  
 ✅ **Scoring System**: Points based on correctness and speed  
 ✅ **Real-time Display**: Shows AI detections on camera feed  
 
-## 📊 AI Requirements Met
+##  AI Requirements Met
 
-1. ✅ **Object identification uses pretrained AI model** - YOLO/MobileNet
+1. ✅ **Object identification uses pretrained AI model** - YOLO
 2. ✅ **Game state based on AI predictions** - `AIGameState` depends on AI
 3. ✅ **Arm actions depend on model outputs** - Verification required
 4. ✅ **50%+ AI integration** - ~60% of code is AI-connected
 
-## 🔧 Troubleshooting
+##  Troubleshooting
 
 ### YOLO not available
 - Install: `pip install ultralytics`
-- Falls back to MobileNet or HSV
-
-### MobileNet not available
-- Install: `pip install torch torchvision`
-- Falls back to HSV color detection
+- Falls back to RGB template matching for color classification
+- Object detection will not work without YOLO
 
 ### No AI models available
-- Game still works with HSV fallback
-- But won't meet "pretrained model" requirement
+- Game will not function properly without YOLO
+- YOLO is required for object detection
+- Color classification falls back to RGB template matching if YOLO classification fails
 
-## 📝 Notes
+##  Notes
 
 - Models are loaded from `models/` directory (yolov8n.pt, yolov8n-cls.pt)
 - Model inference runs on CPU by default (GPU if available)
 - AI scan uses 3 frames (optimized for speed, takes ~1-2 seconds)
 - Verification uses 5 frames with majority voting (3/5 samples must agree)
 - Target selection is always random from detected object types
+- Color classification: PRIMARY = YOLO classification model, FALLBACK = RGB template matching
+- HSV is used only for display/info in scan_scene(), not for game logic
 - Controls: 'N' for new round, 'C' for check object, 'H' for home, 'Z'/'X' for gripper
 

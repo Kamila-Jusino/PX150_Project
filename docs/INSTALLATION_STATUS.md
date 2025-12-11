@@ -27,7 +27,7 @@ All required dependencies have been installed and verified:
 
 2. **PyTorch**: Installed (CPU version) ✓
    - Compatible with ultralytics
-   - MobileNet fallback available
+   - Required for YOLO models
 
 3. **Computer Vision**: All libraries installed ✓
    - OpenCV for image processing

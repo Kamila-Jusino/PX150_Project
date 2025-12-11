@@ -1,94 +1,122 @@
 #!/usr/bin/env python3
-
 """
-PX150 Color Picking Game - Pygame Version
-All UI, camera, and controls in one Pygame window
+AI Vision System
+Provides AI-driven object detection and classification using pretrained models.
+Uses YOLO (ultralytics) for object detection and color classification.
 """
 
-import time
-import random
 import cv2
 import numpy as np
-import pygame
-import sys
-import logging
-from interbotix_xs_modules.xs_robot.arm import InterbotixManipulatorXS
 import pyrealsense2 as rs
+from typing import List, Dict, Optional, Tuple
+import os
+import logging
 
-# AI Integration imports
-from ai_vision import AIVisionSystem
-from ai_game_state import AIGameState
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('px150_game.log'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
+# Try to import YOLO (ultralytics) - primary choice
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except ImportError:
+    YOLO_AVAILABLE = False
+
 # ----- TUNABLE PARAMETERS -----
-JOINT_STEP = 0.12 # radians per keypress
-MOVING_TIME = 0.12 # moving_time passed to Interbotix set_joint_positions
-ROI_PIXEL_MIN = 500 # min color pixels for detection
 DEPTH_THRESHOLD_M = 0.7 # meters, only detect close objects
-SAMPLES_FOR_CONFIRM = 5 # color samples for closing gripper
-SAMPLES_MAJORITY = 3 # majority votes needed
-# Pygame window settings - FULLSCREEN
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
-CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 480
+MIN_CONFIDENCE = 0.2 # minimum confidence for detection (lowered further for better detection)
+YOLO_CONF_THRESHOLD = 0.1 # YOLO confidence threshold (very low to catch all objects)
+YOLO_IMAGE_SIZE = 640 # Optimized for speed (was 1280, faster processing)
+YOLO_IOU_THRESHOLD = 0.5 # IoU threshold for NMS (higher = keep more overlapping detections)
+YOLO_MAX_DETECTIONS = 500 # Maximum detections per image (optimized for speed)
+# Color mapping for classification
+COLOR_NAMES = ['RED', 'GREEN', 'BLUE', 'YELLOW', 'ORANGE', 'PURPLE']
+# Block-like classes that YOLO might detect (will be mapped to 'block')
+BLOCK_LIKE_CLASSES = ['bottle', 'cup', 'book', 'remote', 'mouse', 'keyboard', 'cell phone', 'laptop']
 # -------------------------------
 
-class ColorPickingGame:
-    def __init__(self):
-        # --- Robot init ---
-        logger.info("Initializing Interbotix PX150...")
-        try:
-            self.robot = InterbotixManipulatorXS(
-                robot_model="px150",
-                group_name="arm",
-                gripper_name="gripper"
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize robot: {e}")
-            raise
+# Get the models directory path (relative to this file)
+MODEL_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
 
-        # --- Camera init ---
-        logger.info("Initializing RealSense camera...")
-        self.pipeline = rs.pipeline()
-        cfg = rs.config()
-        cfg.enable_stream(rs.stream.color, CAMERA_WIDTH, CAMERA_HEIGHT, rs.format.bgr8, 30)
-        cfg.enable_stream(rs.stream.depth, CAMERA_WIDTH, CAMERA_HEIGHT, rs.format.z16, 30)
-        self.profile = self.pipeline.start(cfg)
-        depth_sensor = self.profile.get_device().first_depth_sensor()
-        self.depth_scale = depth_sensor.get_depth_scale() if depth_sensor else 0.001
 
-        # warm-up frames
-        for _ in range(20):
-            self.pipeline.wait_for_frames()
-
-        # --- AI Systems ---
-        logger.info("Initializing AI Vision System...")
-        try:
-            self.ai_vision = AIVisionSystem(self.pipeline, model_type='yolo')
-        except Exception as e:
-            logger.error(f"Failed to initialize AI Vision System: {e}")
-            raise
+class AIVisionSystem:
+    """
+    AI-driven vision system using pretrained models for object detection.
+    Uses YOLO for detection and classification.
+    """
+    
+    def __init__(self, pipeline: Optional[rs.pipeline] = None, model_type: str = 'yolo'):
+        """
+        Initialize AI vision system with pretrained model.
         
-        logger.info("Initializing AI Game State...")
-        self.ai_game_state = AIGameState()
-
-        # Movement tuning
-        self.joint_step = JOINT_STEP
-        self.moving_time = MOVING_TIME
-
-        # Color HSV ranges (used as fallback when YOLO fails)
-        self.color_ranges = {
+        Args:
+        pipeline: Optional RealSense pipeline (if None, creates new one)
+        model_type: 'yolo'
+        """
+        self.pipeline = pipeline
+        self.depth_scale = 0.001
+        self.model = None
+        self.model_type = None
+ 
+        # Initialize AI model
+        if model_type == 'yolo' and YOLO_AVAILABLE:
+            logger.info("Loading YOLOv8 pretrained model (optimized for speed)...")
+            try:
+                # Use YOLOv8n (nano) for faster processing
+                self.model = YOLO(os.path.join(MODEL_DIR, 'yolov8n.pt')) # Nano model for speed (object detection)
+                self.model_type = 'yolo'
+                logger.info("✓ YOLO detection model loaded successfully (yolov8n for fast detection)")
+            except (FileNotFoundError, OSError) as e:
+                logger.error(f"Failed to load YOLO model file: {e}")
+                self.model = None
+            except Exception as e:
+                logger.error(f"Unexpected error loading YOLO: {e}", exc_info=True)
+                self.model = None
+ 
+        # Initialize color classification model (AI-driven color classification)
+        if self.model:
+            try:
+                # Try to load fine-tuned model first (if available)
+                try:
+                    self.color_model = YOLO(os.path.join(MODEL_DIR, 'yolo_colors.pt'))
+                    self.color_class_names = ['RED', 'GREEN', 'BLUE', 'YELLOW', 'ORANGE', 'PURPLE']
+                    logger.info("✓ Fine-tuned YOLO color classifier loaded")
+                except (FileNotFoundError, OSError):
+                    # Fallback to pretrained classification model
+                    self.color_model = YOLO(os.path.join(MODEL_DIR, 'yolov8n-cls.pt'))
+                    self.color_class_names = None # Will use ImageNet classes (not ideal, but works)
+                    logger.info("✓ Pretrained YOLO color classifier loaded (yolov8n-cls)")
+                    logger.info(" Note: Consider fine-tuning for better color accuracy")
+            except (FileNotFoundError, OSError) as e:
+                logger.warning(f"Could not load color classifier: {e}")
+                self.color_model = None
+            except Exception as e:
+                logger.error(f"Unexpected error loading color classifier: {e}", exc_info=True)
+                self.color_model = None
+        else:
+            self.color_model = None
+        
+        if self.model is None:
+            logger.warning("WARNING: No AI model available. YOLO-only mode requires YOLO.")
+            self.model_type = None
+ 
+        # Note: Color classifier is now handled by YOLO classification model above
+        # Keep old color classifier initialization commented out for reference
+        # if self.model_type == 'yolo' and self.model:
+        # self._init_color_classifier()
+        
+        # Reference color templates for AI-based classification (RGB values)
+        # Updated to better match real-world colored blocks
+        self.color_templates = {
+            'RED': np.array([220, 30, 30]), # Bright red
+            'GREEN': np.array([30, 180, 30]), # Bright green
+            'BLUE': np.array([30, 60, 220]), # Bright blue (more blue, less red/green)
+            'YELLOW': np.array([255, 240, 0]), # Bright yellow
+            'ORANGE': np.array([255, 140, 0]), # Bright orange
+            'PURPLE': np.array([150, 0, 150]), # Purple (balanced red/blue, no green)
+        }
+        
+        # HSV color ranges for color extraction (display feature)
+        self.color_ranges_hsv = {
             'RED': [[(0, 120, 70), (8, 255, 255)], [(170, 120, 70), (180, 255, 255)]],
             'GREEN': [[(36, 50, 50), (85, 255, 255)]],
             'BLUE': [[(95, 80, 80), (125, 255, 255)]],
@@ -96,100 +124,273 @@ class ColorPickingGame:
             'ORANGE': [[(5, 100, 100), (15, 255, 255)]],
             'PURPLE': [[(125, 50, 50), (155, 255, 255)]],
         }
-
-        self.colors = list(self.color_ranges.keys())
-        self.current_color = None  # Legacy, kept for compatibility
-        self.current_target = None  # NEW: Object type target (PRIMARY - AI-driven)
-        self.start_time = None
-        self.round_times = []
-        self.gripper_open = True
-        self.detected_color = None
-        self.status_message = "Press 'N' to start a new round"
-        self.last_status_time = time.time()
-        self.score = 0
         
-        # Visual effects
-        self.flash_color = None  # For red/green screen flash
-        self.flash_end_time = 0
-        self.confetti_particles = []  # For confetti effect
-        self.confetti_active = False
-        self.confetti_end_time = 0
-
-        # --- Pygame init ---
-        pygame.init()
-        # Fullscreen mode
-        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-        self.screen_width, self.screen_height = self.screen.get_size()
-        pygame.display.set_caption("PX150 Game")
-        self.clock = pygame.time.Clock()
-        self.font_large = pygame.font.Font(None, 48)
-        self.font_medium = pygame.font.Font(None, 32)
-        self.font_small = pygame.font.Font(None, 24)
-        self.running = True
-
-        # Move to a safe starting pose
-        print("Going to home pose...")
-        try:
-            self.robot.arm.go_to_home_pose()
-            self.robot.gripper.release()
-            time.sleep(1.0)
-        except Exception as e:
-            logger.warning(f"Couldn't go to home pose: {e}")
-        logger.info("Game initialized! Pygame window should open.")
-
-    # ----------------- Camera & Vision -----------------
-    def get_camera_frame(self):
-        """Get latest camera frame and convert to Pygame surface"""
-        try:
-            frames = self.pipeline.wait_for_frames(timeout_ms=100)
-            color_frame = frames.get_color_frame()
-            depth_frame = frames.get_depth_frame()
-            if not color_frame or not depth_frame:
-                return None, None
-            color_image = np.asanyarray(color_frame.get_data())
-            h, w = color_image.shape[:2]
+        # Initialize pipeline if not provided
+        if self.pipeline is None:
+            self.pipeline = rs.pipeline()
+            cfg = rs.config()
+            cfg.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+            cfg.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+            self.profile = self.pipeline.start(cfg)
+            depth_sensor = self.profile.get_device().first_depth_sensor()
+            self.depth_scale = depth_sensor.get_depth_scale() if depth_sensor else 0.001
             
-            # Draw ROI rectangle
-            cv2.rectangle(color_image, (w//3, h//3), (2*w//3, 2*h//3), (0, 255, 0), 2)
-            # Get detected color - Use HSV for camera display (faster, YOLO still used for scanning/verification)
-            roi = color_image[h//3:2*h//3, w//3:2*w//3]
-            # Use HSV for real-time display (faster than YOLO per frame)
-            detected = self.get_dominant_color_with_depth(roi, depth_frame, w, h)
-            self.detected_color = detected
-            # Add text overlay on camera image
-            if self.current_target:
-                display_text = f"TARGET: {self.current_target}"
-                if self.current_color:
-                    display_text += f" ({self.current_color})"
-                cv2.putText(color_image, display_text, (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
-                if self.start_time:
-                    elapsed = time.time() - self.start_time
-                    cv2.putText(color_image, f"Time: {elapsed:.1f}s", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            # Warm-up frames
+            for _ in range(20):
+                self.pipeline.wait_for_frames()
+        else:
+            # Get depth scale from existing pipeline
+            try:
+                profile = self.pipeline.get_active_profile()
+                depth_sensor = profile.get_device().first_depth_sensor()
+                self.depth_scale = depth_sensor.get_depth_scale() if depth_sensor else 0.001
+            except Exception:
+                self.depth_scale = 0.001
+ 
+    def _init_color_classifier(self):
+        """Initialize color classifier using YOLO features."""
+        # This will be used to extract features from YOLO's backbone
+        try:
+            import torch
+            import torch.nn as nn
+            
+            # Create a simple color classifier head
+            # Input: YOLO features (we'll extract from intermediate layers) + color stats
+            # Output: 6 color classes
+            self.color_classifier = None # Will be created on-demand
+            self.use_yolo_features = True
+            print("✓ Color classifier initialized (using YOLO features)")
+        except Exception as e:
+            print(f"Warning: Could not initialize color classifier: {e}")
+            self.use_yolo_features = False
+ 
+    def _extract_yolo_features(self, roi: np.ndarray) -> Optional[np.ndarray]:
+        """Extract features from YOLO's backbone/neck layers.
+        Simplified to avoid hanging - uses YOLO's inference output.
+        """
+        if self.model_type != 'yolo' or not self.model:
+            return None
+        
+        try:
+            # Simplified approach: Use YOLO's inference result
+            # This is faster and more reliable than accessing internal model structure
+            # Run YOLO inference (this is fast)
+            results = self.model(roi, conf=0.1, verbose=False, imgsz=640)
+            
+            # Extract features from the results
+            # YOLO processes the image through its backbone, we can use the detection confidence
+            # and bounding box features as a proxy for learned features
+            if len(results) > 0 and len(results[0].boxes) > 0:
+                # Use detection features as proxy
+                boxes = results[0].boxes
+                # Extract features from detections: confidence, box dimensions, position
+                features = []
+                for box in boxes[:3]: # Use top 3 detections
+                    conf = float(box.conf[0])
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    w_box = x2 - x1
+                    h_box = y2 - y1
+                    features.extend([conf, w_box/640.0, h_box/640.0, (x1+x2)/1280.0, (y1+y2)/1280.0])
+                
+                # Pad or truncate to 64 features
+                while len(features) < 64:
+                    features.append(0.0)
+                return np.array(features[:64])
+            
+            # If no detections, return None (will use color stats only)
+            return None
+            
+        except Exception as e:
+            # Feature extraction failed, will use color stats only
+            return None
+ 
+    def _extract_color_statistics(self, roi: np.ndarray) -> np.ndarray:
+        """Extract statistical color features from ROI for AI classification."""
+        try:
+            # Convert to RGB
+            rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+            pixels = rgb.reshape(-1, 3)
+            
+            # Mean RGB values (primary feature)
+            mean_rgb = np.mean(pixels, axis=0)
+            
+            # Standard deviation (texture/variation)
+            std_rgb = np.std(pixels, axis=0)
+            
+            # Median RGB (robust to outliers)
+            median_rgb = np.median(pixels, axis=0)
+            
+            # Dominant color (histogram peak) - more robust
+            hist_r = np.histogram(rgb[:,:,0].flatten(), bins=32, range=(0, 256))[0]
+            hist_g = np.histogram(rgb[:,:,1].flatten(), bins=32, range=(0, 256))[0]
+            hist_b = np.histogram(rgb[:,:,2].flatten(), bins=32, range=(0, 256))[0]
+            peak_r = np.argmax(hist_r) * 8
+            peak_g = np.argmax(hist_g) * 8
+            peak_b = np.argmax(hist_b) * 8
+            
+            # Color moments (higher order statistics)
+            # Skewness approximation
+            skew_r = np.mean(((pixels[:, 0] - mean_rgb[0]) / (std_rgb[0] + 1e-6)) ** 3)
+            skew_g = np.mean(((pixels[:, 1] - mean_rgb[1]) / (std_rgb[1] + 1e-6)) ** 3)
+            skew_b = np.mean(((pixels[:, 2] - mean_rgb[2]) / (std_rgb[2] + 1e-6)) ** 3)
+            
+            # Combine features (15 total features)
+            features = np.concatenate([
+                mean_rgb / 255.0, # Normalized mean (3 values)
+                std_rgb / 255.0, # Normalized std (3 values)
+                median_rgb / 255.0, # Normalized median (3 values)
+                [peak_r / 255.0, peak_g / 255.0, peak_b / 255.0], # Normalized peaks (3 values)
+                [skew_r, skew_g, skew_b] # Skewness (3 values)
+            ])
+            
+            return features
+        except Exception:
+            return np.zeros(15)
+ 
+    def _classify_color_rgb_fallback(self, roi: np.ndarray) -> Optional[Tuple[str, float]]:
+        """
+        Fallback method: Classify color using RGB template matching.
+        Used when YOLO classification model is not available.
+        """
+        # Extract color statistics
+        color_stats = self._extract_color_statistics(roi)
+        # Use existing RGB template matching logic
+        return self._classify_color_from_features(None, color_stats)
+ 
+    def _classify_color_from_features(self, yolo_features: Optional[np.ndarray], 
+                                     color_stats: np.ndarray) -> Optional[Tuple[str, float]]:
+        """Classify color using RGB template matching (fallback method)."""
+        try:
+            # PRIMARY METHOD: Use color statistics (enhanced with YOLO if available)
+            # Extract mean RGB (first 3 values of color_stats)
+            mean_rgb = color_stats[:3] * 255.0 # Denormalize to 0-255 range
+            
+            # VALIDATION: Check if color is too desaturated (too gray/neutral)
+            # Calculate saturation: how far from gray scale
+            max_channel = np.max(mean_rgb)
+            min_channel = np.min(mean_rgb)
+            saturation = (max_channel - min_channel) / (max_channel + 1e-6) # Avoid division by zero
+            channel_diff = max_channel - min_channel
+            
+            # Reject if too desaturated (less than 20% saturation = too gray)
+            if saturation < 0.20:
+                return None # Too gray/neutral to classify
+            
+            # Also reject if all channels are very similar (gray)
+            if channel_diff < 25: # Less than 25 RGB units difference = too gray
+                return None
+            
+            # Reject if brightness is too low (dark gray/black)
+            if max_channel < 40: # Too dark to reliably classify
+                return None
+            
+            # Method: Multi-feature distance-based classification
+            # Use peak (dominant) color as primary - more reliable than mean
+            best_color = None
+            best_score = float('inf')
+            scores = {}
+            
+            # Get peak RGB (dominant color) - most reliable indicator
+            if len(color_stats) >= 9:
+                peak_rgb = color_stats[6:9] * 255.0
             else:
-                cv2.putText(color_image, "Press 'N' to start", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-            if detected:
-                cv2.putText(color_image, f"Sees: {detected}", (10, h-20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-            # Convert BGR to RGB for Pygame
-            color_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
+                peak_rgb = mean_rgb
             
-            # Convert to Pygame surface
-            # pygame.surfarray expects (width, height) format
-            surface = pygame.surfarray.make_surface(np.swapaxes(color_image, 0, 1))
-            return surface, color_image
+            # Get median RGB (robust to outliers)
+            if len(color_stats) >= 6:
+                median_rgb = color_stats[3:6] * 255.0
+            else:
+                median_rgb = mean_rgb
+            
+            for color_name, template in self.color_templates.items():
+                # Calculate multiple distance metrics
+                
+                # 1. Peak color distance (PRIMARY - most reliable for solid colored objects)
+                peak_distance = np.linalg.norm(peak_rgb - template)
+                
+                # 2. Mean RGB distance (secondary)
+                rgb_distance = np.linalg.norm(mean_rgb - template)
+                
+                # 3. Median RGB distance (robust to outliers)
+                median_distance = np.linalg.norm(median_rgb - template)
+                
+                # 4. Channel-specific distance for colors that are sensitive to specific channels
+                # For BLUE: emphasize blue channel, de-emphasize red/green
+                # For PURPLE: emphasize red and blue, de-emphasize green
+                if color_name == 'BLUE':
+                    # Blue should have high blue, low red/green
+                    channel_weights = np.array([2.0, 2.0, 1.0]) # Penalize red/green more
+                elif color_name == 'PURPLE':
+                    # Purple should have balanced red/blue, very low green
+                    channel_weights = np.array([1.0, 3.0, 1.0]) # Heavily penalize green
+                elif color_name == 'RED':
+                    # Red should have high red, low green/blue
+                    channel_weights = np.array([1.0, 2.0, 2.0])
+                elif color_name == 'GREEN':
+                    # Green should have high green, low red/blue
+                    channel_weights = np.array([2.0, 1.0, 2.0])
+                else:
+                    channel_weights = np.array([1.0, 1.0, 1.0])
+                
+                weighted_distance = np.linalg.norm((peak_rgb - template) * channel_weights)
+                
+                # Combined score (peak color weighted most heavily)
+                combined_score = (peak_distance * 0.5 + # Primary: peak color
+                                 rgb_distance * 0.2 + # Secondary: mean
+                                 median_distance * 0.15 + # Tertiary: median
+                                 weighted_distance * 0.15) # Channel-specific weighting
+                
+                scores[color_name] = combined_score
+                
+                if combined_score < best_score:
+                    best_score = combined_score
+                    best_color = color_name
+            
+            # Convert distance to confidence (inverse relationship)
+            # Lower distance = higher confidence
+            max_distance = 250.0 # Maximum expected distance in RGB space
+            confidence = max(0.0, 1.0 - (best_score / max_distance))
+            
+            # Boost confidence if YOLO features are available (AI is helping)
+            if yolo_features is not None and len(yolo_features) > 0:
+                confidence *= 1.15 # 15% boost for using YOLO features
+            
+            confidence = min(1.0, confidence)
+            
+            # Additional validation: check if the best color is significantly better
+            if len(scores) > 1:
+                sorted_scores = sorted(scores.values())
+                if len(sorted_scores) >= 2:
+                    # If second best is very close, reduce confidence
+                    score_diff = sorted_scores[1] - sorted_scores[0]
+                    if score_diff < 20: # Less than 20 RGB units difference
+                        confidence *= 0.8 # Reduce confidence
+            
+            # Additional validation: check if best match is actually close enough
+            # If the best score (distance) is too high, the color doesn't match well
+            if best_score > 150: # If distance > 150 RGB units, color doesn't match well
+                return None # Reject classification - color doesn't match any template well
+            
+            # Threshold: need reasonable confidence
+            if confidence < 0.25: # Increased threshold to require better matches
+                return None
+            
+            return (best_color, confidence)
+            
         except Exception as e:
-            return None, None
-
-    def get_dominant_color_with_depth(self, roi_color, depth_frame, full_w, full_h):
-        """HSV-based color detection - used as fallback when YOLO fails"""
+            return None
+ 
+    def _extract_color_hsv(self, roi: np.ndarray) -> Optional[str]:
+        """
+        Extract color using HSV (for display/info purposes).
+        This is a secondary feature, not used for game logic.
+        """
         try:
-            hsv = cv2.cvtColor(roi_color, cv2.COLOR_BGR2HSV)
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
             best_color = None
             best_count = 0
-            for cname, ranges in self.color_ranges.items():
+            
+            for cname, ranges in self.color_ranges_hsv.items():
                 mask_total = np.zeros(hsv.shape[:2], dtype=np.uint8)
                 for r in ranges:
                     mask_total = cv2.bitwise_or(mask_total, cv2.inRange(hsv, np.array(r[0]), np.array(r[1])))
@@ -197,579 +398,389 @@ class ColorPickingGame:
                 if count > best_count:
                     best_count = count
                     best_color = cname
-
-            if best_count < ROI_PIXEL_MIN:
+            
+            # Minimum threshold for color detection
+            if best_count < 100: # Lower threshold for smaller ROIs
                 return None
-
-            depth_image = np.asanyarray(depth_frame.get_data())
-            h_r, w_r = roi_color.shape[:2]
-            x0 = full_w // 3
-            y0 = full_h // 3
-            depth_roi = depth_image[y0:y0 + h_r, x0:x0 + w_r]
-            valid = depth_roi[depth_roi > 0]
-            if valid.size == 0:
-                return None
-            mean_depth_m = float(valid.mean()) * float(self.depth_scale)
-            if mean_depth_m > DEPTH_THRESHOLD_M:
-                return None
+            
             return best_color
-        except (cv2.error, ValueError, AttributeError) as e:
-            logger.debug(f"Color detection error: {e}")
+        except Exception:
             return None
-        except Exception as e:
-            logger.warning(f"Unexpected error in color detection: {e}")
-            return None
-
-    # ----------------- Game logic -----------------
-    def start_new_round(self):
-        if not self.gripper_open:
-            self._release_gripper()
+ 
+    def detect_object_type(self, roi: np.ndarray) -> Optional[str]:
+        """
+        Detect object type using YOLO (AI-driven).
+        This is the PRIMARY method for game logic.
         
-        # AI Integration: YOLO scans table and identifies objects + colors
-        print("\n" + "="*50)
-        print("YOLO SCANNING TABLE...")
-        print("="*50)
-        # Reduce samples to avoid hanging (3 samples is enough)
-        try:
-            detections = self.ai_vision.scan_scene(num_samples=3)  # Optimized for speed
-            num_objects = self.ai_game_state.update_from_ai_scan(detections)
-        except (RuntimeError, rs.error) as e:
-            logger.error(f"Camera error during YOLO scan: {e}")
-            num_objects = 0
-            detections = []
-        except Exception as e:
-            logger.error(f"Error during YOLO scan: {e}", exc_info=True)
-            num_objects = 0
-            detections = []
+        Args:
+        roi: Region of interest (BGR image)
         
-        print(f"\n✓ YOLO scan complete: {num_objects} objects detected")
-        
-        # Show what colors YOLO found
-        if num_objects > 0:
-            summary = self.ai_game_state.get_detection_summary()
-            print(f"  Object types detected: {', '.join(summary['available_object_types'])}")
-            for obj_type, count in summary['object_type_counts'].items():
-                print(f"    - {obj_type}: {count} object(s)")
-            print(f"  Colors detected (for display): {', '.join(summary['available_colors'])}")
-        
-        # AI Integration: AI picks target OBJECT TYPE (random selection)
-        if num_objects > 0:
-            # Target selection: randomly selects from detected object types
-           
-            ai_target_object = self.ai_game_state.ai_select_target()
-            if ai_target_object:
-                self.current_target = ai_target_object  # PRIMARY: Object type (AI-driven)
-                self.start_time = time.time()
-                
-                # Get color for display (SECONDARY - HSV extracted)
-                target_colors = [obj['color'] for obj in self.ai_game_state.detected_objects 
-                               if obj.get('class') == ai_target_object and obj.get('color')]
-                display_color = target_colors[0] if target_colors else "unknown"
-                
-                print(f"\n✓ AI selected target: {ai_target_object} ({display_color}) (from {num_objects} detected objects)")
-                self.set_status(f"ROUND {len(self.round_times) + 1} - Pick up the {ai_target_object}! ({display_color})")
-            else:
-                # Fallback to random if AI can't select
-                print(f"\n⚠ AI couldn't select target, using random")
-                self.current_target = 'block'  # Default fallback
-                self.current_color = random.choice(self.colors)
-                self.start_time = time.time()
-                self.set_status(f"ROUND {len(self.round_times) + 1} - Pick up the {self.current_target}! ({self.current_color})")
-        else:
-            # Fallback to random if no AI detections
-            print(f"\n⚠ No objects detected by YOLO, using random")
-            self.current_target = 'block'  # Default fallback
-            self.current_color = random.choice(self.colors)
-            self.start_time = time.time()
-            self.set_status(f"ROUND {len(self.round_times) + 1} - Pick up the {self.current_target}! ({self.current_color})")
-        print("="*50)
-
-    def check_color_in_box(self):
-        """Check if the target object type is within the ROI square - PRIMARY: YOLO object detection, SECONDARY: HSV color (display)"""
-        if not self.current_target:
-            self.set_status("Start a round first by pressing 'N'.")
-            return
-        self.set_status("AI verifying object in box...")
-        
-        # PRIMARY: Use AI to verify grabbed object TYPE (YOLO)
-        ai_verifications = []
-        color_samples = []  # SECONDARY: HSV color samples (for display/info)
-        for _ in range(SAMPLES_FOR_CONFIRM):
+        Returns:
+        Object class name (e.g., 'bottle', 'cup', 'block') or None
+        """
+        if self.model_type == 'yolo' and self.model:
             try:
-                frames = self.pipeline.wait_for_frames(timeout_ms=2000)
-                color_frame = frames.get_color_frame()
-                depth_frame = frames.get_depth_frame()
-                if not color_frame or not depth_frame:
-                    continue
-                color_image = np.asanyarray(color_frame.get_data())
-                h, w = color_image.shape[:2]
-                roi = color_image[h//3:2*h//3, w//3:2*w//3]
+                results = self.model(roi, conf=YOLO_CONF_THRESHOLD, verbose=False, imgsz=YOLO_IMAGE_SIZE)
                 
-                # PRIMARY: Verify object TYPE using AI model (YOLO)
-                is_correct, ai_confidence = self.ai_vision.verify_gripper_object(roi, self.current_target)
-                if ai_confidence > 0.3:
-                    ai_verifications.append((is_correct, ai_confidence))
-                
-                # SECONDARY: Extract color using HSV (for display/info)
-                detected_color = self.get_dominant_color_with_depth(roi, depth_frame, w, h)
-                if detected_color:
-                    color_samples.append(detected_color)
-            except (RuntimeError, rs.error) as e:
-                logger.debug(f"Frame capture error: {e}")
-            except Exception as e:
-                logger.warning(f"Unexpected error in verification loop: {e}")
-            time.sleep(0.1)
-        
-        # PRIMARY: Use AI verification (object type) if available
-        if len(ai_verifications) >= SAMPLES_MAJORITY:
-            correct_votes = sum(1 for is_correct, _ in ai_verifications if is_correct)
-            avg_conf = sum(conf for _, conf in ai_verifications) / len(ai_verifications)
-            
-            if correct_votes >= SAMPLES_MAJORITY:
-                # Correct object type detected - award points and complete round
-                self.score += 1
-                elapsed = time.time() - self.start_time if self.start_time else 0
-                
-                # Get color for display (SECONDARY)
-                display_color = max(set(color_samples), key=color_samples.count) if color_samples else "unknown"
-                
-                self.set_status(f"CORRECT! You grabbed a {self.current_target} ({display_color})! +1 point (Score: {self.score}) | Time: {elapsed:.2f}s")
-                self.round_times.append(elapsed)
-                # Visual effects: Green flash and confetti
-                self.flash_color = (0, 255, 0)  # Green
-                self.flash_end_time = time.time() + 0.5
-                self._start_confetti()
-                # AI Integration: Remove object from AI inventory
-                self.ai_game_state.remove_object_by_type(self.current_target)
-                self.current_target = None
-                self.current_color = None  # Clear legacy color too
-                self.start_time = None
-            else:
-                # Wrong object type detected
-                detected_types = []
-                for _ in range(3):  # Quick check for detected type
+                if results and len(results) > 0 and len(results[0].boxes) > 0:
+                    boxes = results[0].boxes
+                    best_box = boxes[0] # Most confident detection
+                    obj_conf = float(best_box.conf[0])
+                    
+                    if obj_conf < MIN_CONFIDENCE:
+                        return None
+                    
+                    # Get YOLO's class prediction
                     try:
-                        frames = self.pipeline.wait_for_frames(timeout_ms=1000)
-                        color_frame = frames.get_color_frame()
-                        if color_frame:
-                            color_image = np.asanyarray(color_frame.get_data())
-                            h, w = color_image.shape[:2]
-                            roi = color_image[h//3:2*h//3, w//3:2*w//3]
-                            detected_type = self.ai_vision.detect_object_type(roi)
-                            if detected_type:
-                                detected_types.append(detected_type)
-                    except (RuntimeError, rs.error) as e:
-                        logger.debug(f"Frame capture error in wrong object detection: {e}")
-                    except Exception as e:
-                        logger.warning(f"Error detecting wrong object type: {e}")
+                        cls_id = int(best_box.cls[0].cpu().numpy())
+                        cls_name = self.model.names[cls_id] if hasattr(self.model, 'names') else f"object_{cls_id}"
+                    except:
+                        cls_name = "object"
+                    
+                    # Get bounding box for block detection
+                    x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
+                    bbox = [x1, y1, x2, y2]
+                    
+                    # Map to 'block' if it's block-like
+                    if self._is_likely_block(cls_name, bbox):
+                        return 'block'
+                    
+                    return cls_name
+            except (RuntimeError, AttributeError) as e:
+                logger.error(f"Object type detection error: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error in object type detection: {e}", exc_info=True)
+        
+        return None
+ 
+    def _is_likely_block(self, cls_name: str, bbox: List[int]) -> bool:
+        """
+        Determine if detected object is likely a block.
+        More aggressive: Map most small/medium objects to blocks.
+        """
+        # Check aspect ratio and size (blocks are roughly cubic)
+        x1, y1, x2, y2 = bbox
+        w, h = x2 - x1, y2 - y1
+        if h == 0:
+            return False
+        
+        aspect_ratio = w / h
+        area = w * h
+        
+        # Very lenient criteria: accept almost any reasonable-sized object as a block
+        # This will catch blocks, pens, cans, etc. - even small ones
+        if 0.3 <= aspect_ratio <= 3.0 and 200 < area < 100000: # Lowered min area, increased max
+            return True
+        
+        return False
+ 
+    def classify_color_ai(self, roi: np.ndarray) -> Optional[Tuple[str, float]]:
+        """
+        Classify color using YOLOv8 classification model (AI-driven).
+        This is the PRIMARY method - uses neural network for color classification.
+        
+        Args:
+        roi: Region of interest (BGR image)
+        
+        Returns:
+        Tuple of (color_name, confidence) or None if classification fails
+        """
+        # PRIMARY: Use YOLO classification model (AI-driven)
+        if hasattr(self, 'color_model') and self.color_model is not None:
+            try:
+                # Run YOLO classification inference
+                # Note: YOLO classification models expect RGB images, but we pass BGR
+                # YOLO will handle the conversion internally
+                results = self.color_model(roi, verbose=False, imgsz=224)
                 
-                wrong_type = max(set(detected_types), key=detected_types.count) if detected_types else "unknown"
-                display_color = max(set(color_samples), key=color_samples.count) if color_samples else "unknown"
-                self.set_status(f"Wrong object in box: {wrong_type} ({display_color}) (need {self.current_target})")
-                # Visual effects: Red flash
-                self.flash_color = (255, 0, 0)  # Red
-                self.flash_end_time = time.time() + 0.5
-        elif not color_samples:
-            # No detections from either method
-            self.set_status("No object detected in the box.")
-            return
-        else:
-            # FALLBACK: If AI didn't have enough samples, try HSV color as last resort
-            most_common = max(set(color_samples), key=color_samples.count)
-            count = color_samples.count(most_common)
-            
-            # Check if color matches any object of target type
-            target_colors = [obj['color'] for obj in self.ai_game_state.detected_objects 
-                           if obj.get('class') == self.current_target and obj.get('color')]
-            
-            if most_common in target_colors and count >= SAMPLES_MAJORITY:
-                # Correct color (and likely correct object type) - award points
-                self.score += 1
-                elapsed = time.time() - self.start_time if self.start_time else 0
-                self.set_status(f"CORRECT! +1 point (Score: {self.score}) | Time: {elapsed:.2f}s")
-                self.round_times.append(elapsed)
-                # Visual effects: Green flash and confetti
-                self.flash_color = (0, 255, 0)  # Green
-                self.flash_end_time = time.time() + 0.5
-                self._start_confetti()
-                # AI Integration: Remove object from AI inventory
-                self.ai_game_state.remove_object_by_type(self.current_target)
-                self.current_target = None
-                self.current_color = None
-                self.start_time = None
-            else:
-                self.set_status(f"Wrong color in box: {most_common} (need {self.current_target})")
-                # Visual effect: Red flash
-                self.flash_color = (255, 0, 0)  # Red
-                self.flash_end_time = time.time() + 0.5
-
-    def _release_gripper(self):
-        try:
-            self.robot.gripper.release()
-            self.gripper_open = True
-        except (AttributeError, RuntimeError) as e:
-            logger.error(f"Gripper release error: {e}")
-            self.gripper_open = True  # Assume open on error
-        except Exception as e:
-            logger.error(f"Unexpected gripper error: {e}")
-            self.gripper_open = True
-        time.sleep(0.2)
-
-    def set_status(self, message):
-        self.status_message = message
-        self.last_status_time = time.time()
-
-    def go_to_home(self):
-        """Move arm to home position and drop anything being held"""
-        self.set_status("Moving to home position...")
-        try:
-            # Release gripper first to drop anything
-            if not self.gripper_open:
-                self._release_gripper()
-            # Move to home
-            self.robot.arm.go_to_home_pose(moving_time=2.0)
-            self.set_status("Arm moved to home position.")
-        except (AttributeError, RuntimeError) as e:
-            logger.error(f"Error moving to home: {e}")
-            self.set_status(f"Error moving to home: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error moving to home: {e}", exc_info=True)
-            self.set_status(f"Error moving to home: {e}")
-
-    # ----------------- Movement -----------------
-    def move_joint_delta(self, joint_idx, delta):
-        """Move a joint by delta amount. Validates input before execution."""
-        if not isinstance(joint_idx, int) or not isinstance(delta, (int, float)):
-            self.set_status(f"Invalid input: joint_idx and delta must be numbers")
-            return
+                if results and len(results) > 0:
+                    # Get top prediction
+                    top1_idx = results[0].probs.top1
+                    confidence = float(results[0].probs.top1conf.item())
+                    
+                    # If fine-tuned model with color classes
+                    if hasattr(self, 'color_class_names') and self.color_class_names:
+                        if top1_idx < len(self.color_class_names):
+                            color_name = self.color_class_names[top1_idx]
+                            # Only return if confidence is reasonable
+                            if confidence >= 0.3: # Minimum confidence threshold
+                                return (color_name, confidence)
+                    
+                    # If using pretrained ImageNet model (not fine-tuned)
+                    # This won't work well for colors, so fall through to RGB fallback
+                    # In practice, you should fine-tune the model
+                    else:
+                        # Pretrained model doesn't know our colors
+                        # Fall through to RGB fallback
+                        pass
+                
+            except (RuntimeError, AttributeError) as e:
+                logger.warning(f"YOLO color classification error: {e}")
+                # Fall through to RGB fallback
+            except Exception as e:
+                logger.error(f"Unexpected error in YOLO color classification: {e}", exc_info=True)
+                # Fall through to RGB fallback
+        
+        # FALLBACK: Use RGB template matching if classification model unavailable or fails
+        return self._classify_color_rgb_fallback(roi)
+ 
+ 
+    def scan_scene(self, num_samples: int = 5) -> List[Dict]:
+        """
+        Perform AI scan of the scene using pretrained model.
+        This is the main AI vision function that returns detections
+        in the format expected by AIGameState.update_from_ai_scan().
+        
+        Args:
+        num_samples: Number of frames to sample for robust detection
+        
+        Returns:
+        List of detected objects, each with:
+        - 'color': Color name (str)
+        - 'confidence': Detection confidence (float, 0-1)
+        - 'position': Approximate position (x, y) in image
+        - 'depth': Distance in meters (float)
+        - 'bbox': Bounding box [x1, y1, x2, y2] (optional)
+        """
+        all_detections = []
         
         try:
-            current_joints = list(self.robot.arm.get_joint_commands())
-            if joint_idx < 0 or joint_idx >= len(current_joints):
-                self.set_status(f"Invalid joint index: {joint_idx} (valid range: 0-{len(current_joints)-1})")
-                return
-            current_joints[joint_idx] += delta
-            self.robot.arm.set_joint_positions(current_joints, moving_time=MOVING_TIME)
-        except (ValueError, IndexError, AttributeError) as e:
-            logger.error(f"Movement error: {e}")
-            self.set_status(f"Movement error: {e}")
+            # Sample multiple frames for robustness (optimized for speed)
+            max_samples = min(num_samples, 3) # Reduced to 3 samples for faster scanning
+            for sample_idx in range(max_samples):
+                try:
+                    frames = self.pipeline.wait_for_frames(timeout_ms=1000) # Reduced timeout
+                    color_frame = frames.get_color_frame()
+                    depth_frame = frames.get_depth_frame()
+                    
+                    if not color_frame or not depth_frame:
+                        continue
+                    
+                    color_image = np.asanyarray(color_frame.get_data())
+                    depth_image = np.asanyarray(depth_frame.get_data())
+                    h, w = color_image.shape[:2]
+                    
+                    detections = []
+                    yolo_detections_count = 0
+                    
+                    if self.model_type == 'yolo' and self.model:
+                        # PRIMARY: Use YOLO to scan table and identify objects + colors
+                        # Balanced option: yolov8s, larger image size, lower confidence
+                        try:
+                            results = self.model(
+                                color_image, 
+                                conf=YOLO_CONF_THRESHOLD, 
+                                verbose=False, 
+                                imgsz=YOLO_IMAGE_SIZE,
+                                iou=YOLO_IOU_THRESHOLD,
+                                max_det=YOLO_MAX_DETECTIONS
+                            )
+                        except (RuntimeError, AttributeError) as e:
+                            logger.error(f"YOLO inference error: {e}")
+                            results = None
+                        except Exception as e:
+                            logger.error(f"Unexpected YOLO inference error: {e}", exc_info=True)
+                            results = None
+                        
+                        if results and len(results) > 0 and len(results[0].boxes) > 0:
+                            boxes = results[0].boxes
+                            
+                            for idx, box in enumerate(boxes):
+                                x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+                                obj_conf = float(box.conf[0])
+                                
+                                # Get YOLO's class prediction (what object type YOLO thinks it is)
+                                try:
+                                    cls_id = int(box.cls[0].cpu().numpy())
+                                    cls_name = self.model.names[cls_id] if hasattr(self.model, 'names') else f"object_{cls_id}"
+                                except:
+                                    cls_name = "object"
+                                
+                                if obj_conf < MIN_CONFIDENCE:
+                                    continue
+                                
+                                # Extract object ROI
+                                x1, y1 = max(0, x1), max(0, y1)
+                                x2, y2 = min(w, x2), min(h, y2)
+                                
+                                if x2 > x1 and y2 > y1:
+                                    object_roi = color_image[y1:y2, x1:x2]
+                                    
+                                    # Skip if ROI is too small (lowered threshold)
+                                    if object_roi.size < 50: # Lowered from 100 to catch smaller objects
+                                        continue
+                                    
+                                    # PRIMARY: Object type from YOLO (AI-driven, for game logic)
+                                    # Map to 'block' if it's block-like
+                                    if self._is_likely_block(cls_name, [x1, y1, x2, y2]):
+                                        cls_name = 'block'
+                                    # Also map if it's a small/medium object regardless of class
+                                    w, h = x2 - x1, y2 - y1
+                                    area = w * h
+                                    if 200 < area < 100000: # More lenient: catch smaller and larger objects
+                                        cls_name = 'block'
+                                    
+                                    # SECONDARY: Extract color using HSV (for display/info)
+                                    color_name = self._extract_color_hsv(object_roi)
+                                    
+                                    # Check depth
+                                    center_x = (x1 + x2) // 2
+                                    center_y = (y1 + y2) // 2
+                                    depth_value = depth_image[center_y, center_x]
+                                    
+                                    if depth_value > 0:
+                                        depth_m = float(depth_value) * float(self.depth_scale)
+                                        if depth_m <= DEPTH_THRESHOLD_M:
+                                            # Create object with unique ID
+                                            # PRIMARY: object class (AI-driven), SECONDARY: color (HSV, display)
+                                            object_id = len(all_detections) + idx
+                                            
+                                            detections.append({
+                                                'object_id': object_id,
+                                                'class': cls_name, # PRIMARY: Object type (AI-driven)
+                                                'color': color_name, # SECONDARY: Color (HSV, for display)
+                                                'confidence': float(obj_conf), # YOLO confidence
+                                                'position': (center_x, center_y),
+                                                'depth': float(depth_m),
+                                                'bbox': [x1, y1, x2, y2]
+                                            })
+                    
+                    all_detections.extend(detections)
+                    
+                    # YOLO-only mode: no other detection methods
+                    # If YOLO is not available, return empty detections
+                    
+                except (RuntimeError, rs.error) as e:
+                    logger.warning(f"Error processing frame {sample_idx + 1}: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Unexpected error processing frame {sample_idx + 1}: {e}", exc_info=True)
+                    continue
+            
+            # Remove duplicates - keep highest confidence for similar objects
+            final_detections = []
+            
+            # Sort by confidence (highest first)
+            all_detections.sort(key=lambda x: x['confidence'], reverse=True)
+            
+            for det in all_detections:
+                obj_class = det.get('class', 'unknown')
+                pos = det['position']
+                
+                # Check if we have this object already at a similar position
+                found_similar = False
+                for existing in final_detections:
+                    # Check distance between positions and same object type
+                    dist = np.sqrt((existing['position'][0] - pos[0])**2 + 
+                                  (existing['position'][1] - pos[1])**2)
+                    existing_class = existing.get('class', 'unknown')
+                    if dist < 50 and obj_class == existing_class: # Same position and same type = duplicate
+                        found_similar = True
+                        # Update if this one has higher confidence
+                        if det['confidence'] > existing['confidence']:
+                            final_detections.remove(existing)
+                            final_detections.append(det)
+                        break
+                
+                if not found_similar:
+                    final_detections.append(det)
+            
+            # Log what YOLO detected (for debugging/feedback)
+            if final_detections:
+                logger.info(f"YOLO scan found {len(final_detections)} objects:")
+                for i, det in enumerate(final_detections, 1):
+                    # Log object type (PRIMARY) and color (SECONDARY, for display)
+                    obj_type = det.get('class', 'unknown')
+                    color_info = f" ({det['color']})" if det.get('color') else ""
+                    logger.info(f" {i}. {obj_type}{color_info} (conf: {det['confidence']:.2f}, pos: {det['position']})")
+            
+            return final_detections
+            
+        except (RuntimeError, rs.error) as e:
+            logger.error(f"AI Vision scan error: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Unexpected movement error: {e}", exc_info=True)
-            self.set_status(f"Movement error: {e}")
-
-    # ----------------- Visual Effects -----------------
-    def _start_confetti(self):
-        """Start confetti effect"""
-        self.confetti_active = True
-        self.confetti_end_time = time.time() + 2.0  # Confetti for 2 seconds
-        self.confetti_particles = []
-        # Create confetti particles
-        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255)]
-        for _ in range(50):
-            self.confetti_particles.append({
-                'x': random.randint(0, self.screen_width),
-                'y': random.randint(-100, 0),
-                'vx': random.uniform(-3, 3),
-                'vy': random.uniform(2, 6),
-                'color': random.choice(colors),
-                'size': random.randint(5, 15)
-            })
-    
-    def _update_confetti(self):
-        """Update confetti particles"""
-        if not self.confetti_active:
-            return
+            logger.error(f"Unexpected AI Vision scan error: {e}", exc_info=True)
+            return []
+ 
+    def verify_gripper_object(self, roi: np.ndarray, expected_object_type: str) -> Tuple[bool, float]:
+        """
+        Verify if object in gripper matches expected object type using AI.
+        This is called when player attempts to grab an object.
         
-        if time.time() > self.confetti_end_time:
-            self.confetti_active = False
-            self.confetti_particles = []
-            return
+        Args:
+        roi: Region of interest showing object in gripper
+        expected_object_type: Expected object type (e.g., 'bottle', 'cup', 'block')
         
-        for particle in self.confetti_particles:
-            particle['x'] += particle['vx']
-            particle['y'] += particle['vy']
-            particle['vy'] += 0.2  # Gravity
+        Returns:
+        Tuple of (is_correct, confidence)
+        """
+        if roi is None or roi.size == 0:
+            return (False, 0.0)
+        
+        try:
+            # PRIMARY: Use YOLO to detect object type (AI-driven)
+            detected_type = self.detect_object_type(roi)
             
-            # Reset if off screen
-            if particle['y'] > self.screen_height:
-                particle['y'] = random.randint(-100, 0)
-                particle['x'] = random.randint(0, self.screen_width)
-    
-    def _draw_confetti(self):
-        """Draw confetti particles"""
-        if not self.confetti_active:
-            return
-        
-        for particle in self.confetti_particles:
-            pygame.draw.rect(
-                self.screen,
-                particle['color'],
-                (int(particle['x']), int(particle['y']), particle['size'], particle['size'])
-            )
-    
-    # ----------------- Rendering -----------------
-    def _wrap_text(self, text, font, max_width):
-        """Wrap text to fit within max_width, returning list of lines"""
-        words = text.split(' ')
-        lines = []
-        current_line = []
-        
-        for word in words:
-            # Test if adding this word would exceed width
-            test_line = ' '.join(current_line + [word])
-            test_surface = font.render(test_line, True, (255, 255, 255))
-            if test_surface.get_width() <= max_width:
-                current_line.append(word)
-            else:
-                if current_line:
-                    lines.append(' '.join(current_line))
-                current_line = [word]
-        
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        return lines if lines else [text]
-    
-    def draw_ui(self):
-        """Draw UI overlay on the screen"""
-        # Handle screen flash effect
-        if self.flash_color and time.time() < self.flash_end_time:
-            # Flash the screen with red or green
-            alpha = int(128 * (1.0 - (self.flash_end_time - time.time()) / 0.5))
-            flash_surface = pygame.Surface((self.screen_width, self.screen_height))
-            flash_surface.set_alpha(alpha)
-            flash_surface.fill(self.flash_color)
-            self.screen.blit(flash_surface, (0, 0))
-        elif self.flash_color:
-            self.flash_color = None
-        
-        # Clear screen with dark background (if no flash)
-        if not self.flash_color or time.time() >= self.flash_end_time:
-            self.screen.fill((20, 20, 30))
-        # Get and draw camera frame
-        camera_surface, _ = self.get_camera_frame()
-        if camera_surface:
-            # Scale camera to fit left side (maintain aspect ratio)
-            scale_factor = min((CAMERA_HEIGHT) / CAMERA_WIDTH, (self.screen_height - 40) / CAMERA_HEIGHT)
-            scaled_width = int(CAMERA_WIDTH * scale_factor)
-            scaled_height = int(CAMERA_HEIGHT * scale_factor)
-            camera_scaled = pygame.transform.scale(camera_surface, (scaled_width, scaled_height))
-            self.screen.blit(camera_scaled, (20, 20))
-
-        # Draw UI panel in the middle
-        panel_x = CAMERA_HEIGHT + 40
-        panel_y = 20
-        panel_width = 350 # Increased width for better text display
-        panel_height = self.screen_height - 40
-        
-
-        # Statistics panel on the far right (increased width for better display)
-        stats_panel_x = panel_x + panel_width + 20
-        stats_panel_width = max(300, self.screen_width - stats_panel_x - 20)  # Minimum 300px width
-        # Draw panel background
-        pygame.draw.rect(self.screen, (40, 40, 50), (panel_x, panel_y, panel_width, panel_height))
-        pygame.draw.rect(self.screen, (60, 60, 70), (panel_x, panel_y, panel_width, panel_height), 2)
-        y_offset = panel_y + 20
-        # Title
-        title = self.font_large.render("PX150 Color Picking Game", True, (255, 255, 255))
-        self.screen.blit(title, (panel_x + 20, y_offset))
-        y_offset += 60
-        # Game status
-        if self.current_target:
-            target_text = f"Target: {self.current_target}"
-            if self.current_color:
-                target_text += f" ({self.current_color})"
-            color_text = self.font_medium.render(target_text, True, (255, 255, 0))
-            self.screen.blit(color_text, (panel_x + 20, y_offset))
-            y_offset += 40
-            if self.start_time:
-                elapsed = time.time() - self.start_time
-                time_text = self.font_small.render(f"Time: {elapsed:.1f}s", True, (200, 200, 200))
-                self.screen.blit(time_text, (panel_x + 20, y_offset))
-                y_offset += 30
-        # Detected color
-        if self.detected_color:
-            detected_text = self.font_small.render(f"Camera sees: {self.detected_color}", True, (0, 255, 255))
-            self.screen.blit(detected_text, (panel_x + 20, y_offset))
-            y_offset += 30
-        # Status message (with text wrapping)
-        status_lines = self._wrap_text(self.status_message, self.font_small, panel_width - 40)
-        for line in status_lines:
-            status_text = self.font_small.render(line, True, (150, 255, 150))
-            self.screen.blit(status_text, (panel_x + 20, y_offset))
-            y_offset += 25
-        y_offset += 25  # Extra spacing after status
-        # Controls section
-        controls_title = self.font_medium.render("Controls:", True, (255, 255, 255))
-        self.screen.blit(controls_title, (panel_x + 20, y_offset))
-        y_offset += 35
-        controls = [
-            "W/S: Forward/Backward",
-            "A/D: Left/Right",
-            "Q/E: Up/Down",
-            "R/F: Wrist pitch up/down",
-            "T/G: Wrist roll left/right",
-            "C: Check color in box",
-            "Z: Close gripper manually",
-            "X: Release gripper manually",
-            "H: Go to home (drops object)",
-            "N: New round",
-            "ESC: Quit"
-        ]
-        for control in controls:
-            # Wrap long control text
-            control_lines = self._wrap_text(control, self.font_small, panel_width - 50)
-            for line in control_lines:
-                control_text = self.font_small.render(line, True, (200, 200, 200))
-                self.screen.blit(control_text, (panel_x + 30, y_offset))
-                y_offset += 25
-        # Gripper status
-        gripper_status = "OPEN" if self.gripper_open else "CLOSED"
-        gripper_color = (0, 255, 0) if self.gripper_open else (255, 0, 0)
-        gripper_text = self.font_small.render(f"Gripper: {gripper_status}", True, gripper_color)
-        self.screen.blit(gripper_text, (panel_x + 20, panel_y + panel_height - 30))
-
-        # Draw statistics panel on the right
-        pygame.draw.rect(self.screen, (40, 40, 50), (stats_panel_x, panel_y, stats_panel_width, panel_height))
-        pygame.draw.rect(self.screen, (60, 60, 70), (stats_panel_x, panel_y, stats_panel_width, panel_height), 2)
-        
-        stats_y_offset = panel_y + 20
-        
-        # Stats title
-        stats_title = self.font_medium.render("Statistics", True, (255, 255, 255))
-        self.screen.blit(stats_title, (stats_panel_x + 20, stats_y_offset))
-        stats_y_offset += 40
-        # Always show score prominently
-        score_label = self.font_small.render("Score:", True, (200, 200, 200))
-        self.screen.blit(score_label, (stats_panel_x + 20, stats_y_offset))
-        score_value = self.font_large.render(f"{self.score}", True, (255, 215, 0))
-        self.screen.blit(score_value, (stats_panel_x + 20, stats_y_offset + 25))
-        stats_y_offset += 70
-        # Round statistics
-        if self.round_times:
-            rounds_text = self.font_small.render(f"Rounds: {len(self.round_times)}", True, (200, 200, 200))
-            self.screen.blit(rounds_text, (stats_panel_x + 20, stats_y_offset))
-            stats_y_offset += 30
-            best_text = self.font_small.render(f"Best time: {min(self.round_times):.2f}s", True, (200, 200, 200))
-            self.screen.blit(best_text, (stats_panel_x + 20, stats_y_offset))
-            stats_y_offset += 30
-            avg_text = self.font_small.render(f"Average: {sum(self.round_times)/len(self.round_times):.2f}s", True, (200, 200, 200))
-            self.screen.blit(avg_text, (stats_panel_x + 20, stats_y_offset))
-        else:
-            no_stats_text = self.font_small.render("No rounds completed yet", True, (150, 150, 150))
-            self.screen.blit(no_stats_text, (stats_panel_x + 20, stats_y_offset))
-
-    # ----------------- Main loop -----------------
-    def run(self):
-        logger.info("Game running! Use the Pygame window for controls.")
-        
-        while self.running:
-            # Handle events
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        self.running = False
-                    elif event.key == pygame.K_n:
-                        if not self.gripper_open:
-                            self._release_gripper()
-                        self.start_new_round()
-                    elif event.key == pygame.K_c:
-                        self.check_color_in_box()
-                    elif event.key == pygame.K_h:
-                        self.go_to_home()
-                    elif event.key == pygame.K_z:
-                        if self.gripper_open:
-                            try:
-                                self.robot.gripper.grasp()
-                                self.gripper_open = False
-                                self.set_status("Gripper manually closed.")
-                            except (AttributeError, RuntimeError) as e:
-                                logger.error(f"Gripper error: {e}")
-                                self.set_status(f"Gripper error: {e}")
-                            except Exception as e:
-                                logger.error(f"Unexpected gripper error: {e}")
-                                self.set_status(f"Gripper error: {e}")
-                    elif event.key == pygame.K_x:
-                        if not self.gripper_open:
-                            self._release_gripper()
-                            self.set_status("Gripper manually released.")
-                    elif event.key == pygame.K_w:
-                        self.move_joint_delta(1, -JOINT_STEP)
-                    elif event.key == pygame.K_s:
-                        self.move_joint_delta(1, JOINT_STEP)
-                    elif event.key == pygame.K_a:
-                        self.move_joint_delta(0, JOINT_STEP)
-                    elif event.key == pygame.K_d:
-                        self.move_joint_delta(0, -JOINT_STEP)
-                    elif event.key == pygame.K_q:
-                        self.move_joint_delta(2, -JOINT_STEP)
-                    elif event.key == pygame.K_e:
-                        self.move_joint_delta(2, JOINT_STEP)
-                    elif event.key == pygame.K_r:
-                        self.move_joint_delta(3, -JOINT_STEP)
-                    elif event.key == pygame.K_f:
-                        self.move_joint_delta(3, JOINT_STEP)
-                    elif event.key == pygame.K_t:
-                        self.move_joint_delta(4, JOINT_STEP)
-                    elif event.key == pygame.K_g:
-                        self.move_joint_delta(4, -JOINT_STEP)
-
-            # Update visual effects
-            self._update_confetti()
+            if detected_type:
+                is_correct = (detected_type.lower() == expected_object_type.lower())
+                # Get confidence from YOLO detection
+                results = self.model(roi, conf=YOLO_CONF_THRESHOLD, verbose=False, imgsz=YOLO_IMAGE_SIZE)
+                if results and len(results) > 0 and len(results[0].boxes) > 0:
+                    confidence = float(results[0].boxes[0].conf[0])
+                    return (is_correct, confidence)
+                return (is_correct, 0.5) # Default confidence if can't get from YOLO
             
-            # Draw everything
-            self.draw_ui()
-            
-            # Draw confetti on top
-            self._draw_confetti()
-            
-            pygame.display.flip()
-            self.clock.tick(30) # 30 FPS
-        self.cleanup()
-
+            return (False, 0.0)
+        except (RuntimeError, AttributeError) as e:
+            logger.error(f"Verification error: {e}")
+            return (False, 0.0)
+        except Exception as e:
+            logger.error(f"Unexpected verification error: {e}", exc_info=True)
+            return (False, 0.0)
+ 
     def cleanup(self):
-        logger.info("Shutting down: moving to safe pose & stopping camera.")
-        try:
-            if not self.gripper_open:
-                self._release_gripper()
-            self.robot.arm.go_to_home_pose()
-            time.sleep(0.6)
-            self.robot.arm.go_to_sleep_pose()
-        except Exception as e:
-            logger.error(f"Cleanup robot error: {e}")
-        try:
-            self.ai_vision.cleanup()
-        except Exception as e:
-            logger.warning(f"Error cleaning up AI vision: {e}")
-        try:
-            self.pipeline.stop()
-        except Exception as e:
-            logger.warning(f"Error stopping camera pipeline: {e}")
-        pygame.quit()
-        if self.round_times:
-            summary = f"Rounds: {len(self.round_times)} | Best: {min(self.round_times):.2f}s | Avg: {sum(self.round_times)/len(self.round_times):.2f}s"
-            logger.info(summary)
-            print(summary)
-        else:
-            logger.info("No rounds completed.")
-            print("No rounds completed.")
-        logger.info("Goodbye.")
-        print("Goodbye.")
+        """Cleanup resources."""
+        if self.pipeline:
+            try:
+                self.pipeline.stop()
+            except (RuntimeError, rs.error) as e:
+                logger.warning(f"Error stopping pipeline: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error stopping pipeline: {e}")
 
-if __name__ == "__main__":
+
+def create_ai_vision_system(pipeline: Optional[rs.pipeline] = None, 
+                            model_type: str = 'yolo') -> AIVisionSystem:
+    """
+    Factory function to create an AI vision system.
+    
+    Args:
+    pipeline: Optional RealSense pipeline
+    model_type: 'yolo'
+    
+    Returns:
+    AIVisionSystem instance
+    """
+    return AIVisionSystem(pipeline, model_type)
+
+
+if __name__ == '__main__':
+    # Test the AI vision system
+    logging.basicConfig(level=logging.INFO)
+    logger.info("Testing AI Vision System...")
+    vision = AIVisionSystem()
+    
     try:
-        game = ColorPickingGame()
-        game.run()
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
-        print("\n\nInterrupted by user")
-    except Exception as e:
-        logger.critical(f"Fatal error: {e}", exc_info=True)
-        import traceback
-        print(f"\nError: {e}")
-        traceback.print_exc()
+        logger.info("Scanning scene with AI model...")
+        detections = vision.scan_scene(num_samples=3)
+        
+        logger.info(f"\nDetected {len(detections)} objects:")
+        for i, det in enumerate(detections, 1):
+            color = det.get('color', 'unknown')
+            logger.info(f" {i}. {color} - Confidence: {det['confidence']:.2f} - "
+                       f"Position: {det['position']} - Depth: {det['depth']:.3f}m")
+        
     finally:
-        logger.info("Exiting...")
-        print("Exiting...")
+        vision.cleanup()
+        logger.info("\nTest complete.")
